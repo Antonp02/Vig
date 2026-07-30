@@ -434,3 +434,77 @@ button,select,input,a{touch-action:manipulation}
   body.has-slip-bar .page-shell{padding-bottom:calc(132px + env(safe-area-inset-bottom))}
   body.has-slip-bar .toast{bottom:calc(126px + env(safe-area-inset-bottom))}
 }
+
+/* ===================== v1.4.4 — golf test, admin, identity ===================== */
+.golf-panel{margin-bottom:20px}
+.golf-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-start}
+.golf-head h2{margin:6px 0 4px;font-size:clamp(20px,2.6vw,28px);letter-spacing:-.03em}
+.golf-status{text-align:right;flex:0 0 auto}
+.golf-status small{display:block;color:var(--muted);font-size:11px;margin-top:6px}
+.status-pill{display:inline-block;font-size:10px;font-weight:800;letter-spacing:.1em;
+  padding:5px 10px;border-radius:999px;text-transform:uppercase}
+.status-pill.open{background:rgba(74,217,145,.14);color:#4ad991;border:1px solid #2f6b4f}
+.status-pill.locked{background:rgba(232,189,105,.13);color:var(--gold);border:1px solid #6b5427}
+.status-pill.final{background:var(--accent-dark);color:var(--accent-soft);border:1px solid #2f5f9c}
+.golf-bankroll{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:18px 0 14px}
+.golf-bankroll div{padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,.018)}
+.golf-bankroll span{display:block;color:var(--muted);font-size:10px}
+.golf-bankroll strong{display:block;margin-top:6px;font-size:17px}
+.golf-notice{margin:0 0 16px;font-size:11px;line-height:1.55;color:var(--muted);
+  border-left:3px solid var(--accent-dark);padding:9px 12px;background:rgba(40,117,203,.06)}
+.golf-list{display:grid;gap:2px}
+.golf-row{display:grid;grid-template-columns:1fr auto 74px;gap:12px;align-items:center;
+  padding:13px 4px;border-bottom:1px solid var(--line)}
+.golf-row:last-child{border-bottom:0}
+.golf-row.winner{background:rgba(74,217,145,.07);border-radius:8px}
+.golf-name strong{display:block;font-size:14px}
+.golf-name small{display:block;color:var(--muted);font-size:11px;margin-top:3px}
+.golf-mine{color:var(--accent-soft)}
+.golf-locked{text-align:center;font-size:11px;font-weight:800;color:var(--muted)}
+.golf-row.winner .golf-locked{color:#4ad991}
+.golf-slip{margin-bottom:20px;border-color:var(--accent-dark)}
+.golf-slip-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0}
+.golf-slip-grid div{padding:12px;border:1px solid var(--line);border-radius:11px;background:rgba(255,255,255,.018)}
+.golf-slip-grid span{display:block;color:var(--muted);font-size:10px}
+.golf-slip-grid strong{display:block;margin-top:6px;font-size:16px}
+.golf-stake-label{display:block;color:var(--muted);font-size:12px;margin-bottom:10px}
+.golf-stake-label input{display:block;width:100%;margin-top:7px;background:#08110d;
+  border:1px solid var(--line);color:var(--text);padding:12px;border-radius:9px;font-size:16px}
+.golf-stake-quick{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}
+.golf-stake-quick .active{border-color:var(--accent);color:var(--accent-soft)}
+.golf-error{margin:0 0 12px;color:var(--red);font-size:12px}
+
+.admin-panel{margin-bottom:20px;border-color:var(--gold)}
+.admin-panel[hidden]{display:none}
+.admin-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin-top:18px}
+.admin-block{padding:14px;border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,.018)}
+.admin-block.danger{border-color:#7a3540}
+.admin-block h3{margin:0 0 10px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.admin-block label{display:block;color:var(--muted);font-size:12px;margin-bottom:10px}
+.admin-block select{display:block;width:100%;margin-top:6px;background:#0a111c;border:1px solid var(--line);
+  color:var(--text);padding:11px;border-radius:9px;font-size:16px}
+.admin-actions{display:flex;gap:8px;flex-wrap:wrap}
+.admin-actions button{flex:1 1 auto;min-width:110px}
+.admin-note{margin:10px 0 0;color:var(--muted);font-size:11px;line-height:1.5}
+
+.identity-gate{position:fixed;inset:0;z-index:150;display:none;place-items:center;padding:20px;
+  background:rgba(3,6,11,.86);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+.identity-gate.open{display:grid}
+.identity-card{width:min(400px,100%);padding:28px;border:1px solid var(--line);border-radius:18px;
+  background:#111824;box-shadow:0 30px 90px rgba(0,0,0,.55)}
+.identity-card h2{font-size:24px;margin:8px 0}
+.identity-card>p{color:var(--muted);line-height:1.55;margin:0 0 20px;font-size:13px}
+.identity-card label{display:block;color:var(--muted);font-size:12px;margin-bottom:14px}
+.identity-card input{display:block;width:100%;margin-top:7px;background:#0a111c;border:1px solid var(--line);
+  color:var(--text);padding:13px;border-radius:10px;font-size:16px}
+.identity-error{margin:0 0 10px;color:var(--red);font-size:12px;min-height:14px}
+.status.push{color:var(--accent-soft)}
+
+@media(max-width:700px){
+  .golf-head{flex-direction:column}
+  .golf-status{text-align:left}
+  .golf-bankroll{grid-template-columns:1fr}
+  .golf-slip-grid{grid-template-columns:1fr 1fr}
+  .golf-row{grid-template-columns:1fr auto 64px;gap:8px}
+  .admin-grid{grid-template-columns:1fr}
+}

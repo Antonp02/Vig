@@ -74,7 +74,7 @@
 
       <div class="bankroll-card">
         <div class="bankroll-head"><div><span class="eyebrow">WEEKLY BANKROLL</span><div class="bankroll-value" id="bankrollValue">$1,000.00</div></div><div class="change-chip" id="bankrollChange">+$0.00</div></div>
-        <div class="week-meta"><span id="weekReset">Resets Monday</span><span id="betsLeft">25 bets left</span></div><div class="chart-toolbar"><span>This week</span><div><button class="chart-range active" data-range="7">7D</button><button class="chart-range" data-range="30">30D</button></div></div>
+        <div class="week-meta"><span id="weekReset">Resets Tuesday</span><span id="betsLeft">25 bets left</span></div><div class="chart-toolbar"><span>This week</span><div><button class="chart-range active" data-range="7">7D</button><button class="chart-range" data-range="30">30D</button></div></div>
         <div class="chart-wrap"><svg id="bankrollChart" viewBox="0 0 520 180" role="img" aria-label="Virtual bankroll history chart"></svg></div>
         <div class="mini-stats"><div><strong id="ticketCount">0/25</strong><span>Bets used</span></div><div><strong id="hitRate">0%</strong><span>Hit rate</span></div><div><strong id="openCount">0</strong><span>Open bets</span></div></div>
       </div>
@@ -114,7 +114,7 @@
   </section>
 
   <section id="bets" class="view">
-    <div class="section-title"><div><span class="eyebrow">BET TRACKER</span><h1>My Bets</h1><p>This week only. Tickets archive every Monday when the bankroll resets.</p><div class="bet-actions"><button id="settleBets" class="secondary">Settle open tickets</button><button id="resetWeek" class="text-btn">Restart this week</button></div></div><div class="summary-strip"><div><span>Risked</span><strong id="totalRisked">$0</strong></div><div><span>At risk</span><strong id="atRisk">$0</strong></div><div><span>Realized P/L</span><strong id="netProfit">$0</strong></div><div><span>Bets used</span><strong id="betsUsed">0/25</strong></div></div></div>
+    <div class="section-title"><div><span class="eyebrow">BET TRACKER</span><h1>My Bets</h1><p>This week only. Tickets archive every Tuesday when the bankroll resets.</p><div class="bet-actions"><button id="settleBets" class="secondary">Settle open tickets</button><button id="resetWeek" class="text-btn">Restart this week</button></div></div><div class="summary-strip"><div><span>Risked</span><strong id="totalRisked">$0</strong></div><div><span>At risk</span><strong id="atRisk">$0</strong></div><div><span>Realized P/L</span><strong id="netProfit">$0</strong></div><div><span>Bets used</span><strong id="betsUsed">0/25</strong></div></div></div>
     <div class="filter-row bet-filters"><button class="bet-filter active" data-status="all">All</button><button class="bet-filter" data-status="open">Open</button><button class="bet-filter" data-status="won">Won</button><button class="bet-filter" data-status="lost">Lost</button></div>
     <section class="panel"><div id="betHistory" class="bet-history"></div></section>
   </section>
@@ -146,15 +146,17 @@
   </section>
 
   <section id="trending" class="view">
-    <div class="section-title"><div><span class="eyebrow">TRENDING SPORTS</span><h1>Beyond the NFL</h1><p>Golf, tennis, and soccer outrights you can add straight to a mock parlay. Value chips flag prices paying more than the simulated fair number.</p></div></div>
+    <div class="section-title"><div><span class="eyebrow">TRENDING SPORTS</span><h1>Beyond the NFL</h1><p>The live golf event runs on real bet-slip mechanics with your virtual bankroll. Tennis and soccer below are still simulated demo markets.</p></div></div>
+    <div id="golfEvent"></div>
+    <section class="panel admin-panel" id="adminPanel" hidden></section>
     <div id="trendingBoards" class="trending-boards"></div>
   </section>
 
-  <section id="leaderboard" class="view"><div class="section-title"><div><span class="eyebrow">PRIVATE LEAGUE</span><h1>Weekly leaderboard</h1><p>Ranked by realized profit for the current week. Resets Monday 12:00 AM ET.</p></div></div><section class="panel leaderboard-card"><div id="leaderboardList"></div></section><section class="panel draft-results" id="draftResults"></section>
+  <section id="leaderboard" class="view"><div class="section-title"><div><span class="eyebrow">PRIVATE LEAGUE</span><h1>Weekly leaderboard</h1><p>Ranked by realized profit for the current week. Resets Tuesday 2:00 AM PT.</p></div></div><section class="panel leaderboard-card"><div id="leaderboardList"></div></section><section class="panel draft-results" id="draftResults"></section>
     <section class="panel saved-drafts"><div class="panel-head"><div><span class="eyebrow">ARCHIVE</span><h2>Past weeks</h2></div></div><div id="weekHistory"></div></section></section>
 
   <section id="friends" class="view">
-    <div class="section-title"><div><span class="eyebrow">PRIVATE GROUPS</span><h1>Compete with friends</h1><p>Everyone starts Monday at $1,000 with 25 bets. Highest realized profit on Sunday night wins the week.</p></div><button id="createInvite" class="primary">Create invite link</button></div>
+    <div class="section-title"><div><span class="eyebrow">PRIVATE GROUPS</span><h1>Compete with friends</h1><p>Everyone starts Tuesday at $1,000 with 25 bets. Highest realized profit when the week closes takes it.</p></div><button id="createInvite" class="primary">Create invite link</button></div>
     <div class="friends-grid">
       <section class="panel invite-panel"><span class="eyebrow">YOUR GROUP</span><h2>VIG Founders League</h2><p class="muted-copy">Private group · 8 of 20 spots filled</p><div class="capacity"><div><span style="width:40%"></span></div><div class="invite-controls"><label>Group size<select id="groupSize"><option>10 people</option><option selected>20 people</option></select></label><label>Invite link<div class="copy-row"><input id="inviteLink" readonly value="vig.app/invite/VIG-AP20"/><button id="copyInvite" class="secondary">Copy</button></div></label></div><p class="draft-note">Prototype only: the link is not connected to real accounts yet.</p></section>
       <section class="panel"><div class="panel-head"><div><span class="eyebrow">HEAD-TO-HEAD</span><h2>How you stack up</h2></div><span class="updated">This week</span></div><div class="compare-list" id="compareList"></div><button class="full secondary" data-jump="leaderboard">Open full leaderboard</button></section>
@@ -188,6 +190,17 @@
   </div>
 </div>
 <nav class="mobile-nav" id="mobileNav" aria-label="Primary"><button class="mobile-nav-btn" data-view="parlay" aria-label="Mock"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5A1.5 1.5 0 0 1 4.5 7h15A1.5 1.5 0 0 1 21 8.5v2a2 2 0 0 0 0 3v2A1.5 1.5 0 0 1 19.5 17h-15A1.5 1.5 0 0 1 3 15.5v-2a2 2 0 0 0 0-3z"/><path d="M14 7v10"/></svg><small>Mock</small></button><button class="mobile-nav-btn" data-view="bets" aria-label="My Bets"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg><small>My Bets</small></button><button class="mobile-nav-btn" data-view="fantasy" aria-label="Fantasy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v6c0 4-3 7.2-7 9-4-1.8-7-5-7-9V6z"/><path d="M9.5 12l1.8 1.8L15 10"/></svg><small>Fantasy</small></button><button class="mobile-nav-btn" data-view="linewinder" aria-label="Lines"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 17l5-5 3.5 3.5L21 6"/><path d="M15 6h6v6"/></svg><small>Lines</small></button><button class="mobile-nav-btn" data-view="friends" aria-label="Friends"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0"/><path d="M16 5.5a3 3 0 0 1 0 5"/><path d="M17.5 20a6 6 0 0 0-2-4.5"/></svg><small>Friends</small></button></nav>
+<div class="identity-gate" id="identityGate">
+  <div class="identity-card">
+    <span class="eyebrow">WELCOME TO VIG</span>
+    <h2>Pick a display name</h2>
+    <p>This is how you appear on the private leaderboard. Virtual funds only — no real money, deposits or prizes.</p>
+    <label>Display name<input id="identityName" type="text" maxlength="24" placeholder="e.g. Antonio" autocomplete="nickname"></label>
+    <label>League code <small>(optional)</small><input id="identityCode" type="text" maxlength="8" placeholder="VIG01"></label>
+    <p class="identity-error" id="identityError"></p>
+    <button class="full primary" id="identitySave">Start with $1,000 virtual</button>
+  </div>
+</div>
 <div id="bootError" class="boot-error" hidden></div>
 <div id="toast" class="toast"></div>
 <script src="app.js"></script>

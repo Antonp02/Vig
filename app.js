@@ -10,7 +10,11 @@ const KEYS = {
   results:   'vig.v2.results',
   snapshots: 'vig.v2.snapshots',
   drafts:    'vig.v2.drafts',
-  mode:      'vig.v2.mode'
+  mode:      'vig.v2.mode',
+  golf:      'vig.v2.golf',
+  golfStake: 'vig.v2.golfStake',
+  identity:  'vig.v2.identity',
+  lifetime:  'vig.v2.lifetime'
 };
 
 const Store = (() => {
@@ -98,20 +102,29 @@ const median = arr => {
    Week identity is the ET Monday date, so it is stable no matter
    what timezone the player is sitting in.
 ------------------------------------------------------------ */
+/* Paused during the private test so a rollover cannot wipe results
+   mid-session. The admin panel exposes Finalize Week / Start New Week
+   instead. Flip to true for normal operation. */
+const AUTO_ROLLOVER = false;
+
 const WEEKLY_BANKROLL = 1000;
 const WEEKLY_BET_LIMIT = 25;
-const ET = 'America/New_York';
+/* The competition week is anchored to Pacific so the label is unambiguous.
+   Tuesday 02:00 PT is Tuesday 05:00 ET — after Monday Night Football ends and
+   well before Thursday kickoff, so an NFL week (Thu -> Mon night) never
+   straddles two competition weeks. Golf runs Thu-Sun, clear of it too. */
+const RESET_TZ = 'America/Los_Angeles';
 /* An NFL week runs Thursday -> Monday night. A Monday 00:00 boundary split it
    in half, dropping Monday Night Football into the following VIG week. The
-   reset is now Tuesday 04:00 ET: after MNF ends, before Thursday kickoff, and
+   reset is Tuesday 02:00 Pacific: after MNF ends, before Thursday kickoff, and
    the same place real fantasy leagues process waivers. */
 const RESET_DOW = 2;        // 0=Sun, 2=Tue
-const RESET_HOUR = 4;       // 04:00 ET
+const RESET_HOUR = 2;       // 02:00 Pacific
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-function etParts(date = new Date()) {
+function tzParts(date = new Date()) {
   const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: ET, weekday: 'short', year: 'numeric', month: '2-digit',
+    timeZone: RESET_TZ, weekday: 'short', year: 'numeric', month: '2-digit',
     day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
     hourCycle: 'h23'
   }).formatToParts(date).reduce((acc, p) => (acc[p.type] = p.value, acc), {});
@@ -123,10 +136,10 @@ function etParts(date = new Date()) {
   };
 }
 
-/* Tuesday-of-week key, e.g. "2026-07-28". Times before 04:00 ET belong to the
+/* Tuesday-of-week key, e.g. "2026-07-28". Times before 02:00 PT belong to the
    previous day, so Monday 23:00 still resolves to the prior Tuesday. */
 function weekKeyFor(date = new Date()) {
-  const p = etParts(date);
+  const p = tzParts(date);
   let base = Date.UTC(p.year, p.month - 1, p.day);
   let dow = p.dow;
   if (p.hour < RESET_HOUR) {                    // still "yesterday" for us
@@ -139,9 +152,9 @@ function weekKeyFor(date = new Date()) {
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
 }
 
-/* Absolute instant of the next Tuesday 04:00 ET, DST-corrected. */
+/* Absolute instant of the next Tuesday 02:00 PT, DST-corrected. */
 function nextResetAt(now = new Date()) {
-  const p = etParts(now);
+  const p = tzParts(now);
   let dow = p.dow;
   let hoursIntoDay = p.hour - RESET_HOUR;
   if (hoursIntoDay < 0) { hoursIntoDay += 24; dow = (dow + 6) % 7; }
@@ -149,7 +162,7 @@ function nextResetAt(now = new Date()) {
   const elapsedMs = ((daysSinceReset * 24 + hoursIntoDay) * 60 + p.minute) * 60000
                     + p.second * 1000;
   let candidate = new Date(now.getTime() + (7 * 864e5 - elapsedMs));
-  const cp = etParts(candidate);
+  const cp = tzParts(candidate);
   if (cp.hour !== RESET_HOUR) {                       // clocks shifted mid-week
     let diff = cp.hour - RESET_HOUR;
     if (diff > 12) diff -= 24; else if (diff < -12) diff += 24;
@@ -184,7 +197,9 @@ function weekStats(w) {
      excluded from P/L, hit rate and risked or it reads as a loss. */
   const graded = t.filter(x => x.status === 'won' || x.status === 'lost');
   const open = t.filter(x => x.status === 'open');
-  const voided = t.filter(x => x.status === 'void');
+  /* push and void both return the stake untouched, so neither belongs in
+     profit, hit rate or amount risked */
+  const voided = t.filter(x => x.status === 'void' || x.status === 'push');
   const returned = graded.reduce((a, x) => a + (x.status === 'won' ? x.returnAmount : 0), 0);
   const gradedStake = graded.reduce((a, x) => a + x.stake, 0);
   const wins = graded.filter(x => x.status === 'won').length;
@@ -198,6 +213,9 @@ function weekStats(w) {
     realizedPL: round2(returned - gradedStake),
     hitRate: graded.length ? Math.round(wins / graded.length * 100) : 0,
     settledCount: graded.length,
+    /* return on the money actually resolved — undefined before anything settles */
+    roi: gradedStake > 0 ? round2(100 * (returned - gradedStake) / gradedStake) : null,
+    wagered: round2(gradedStake),
     bankroll: round2(w.bankroll)
   };
 }
@@ -423,15 +441,51 @@ let chartMode = 'teams';                 // 'teams' | 'books'
 let selectedLineTeams = [];              // teams mode, up to 4
 let bookTeam = null;                     // books mode, exactly 1
 
+/* Every leaderboard needs a stable name. Asked once, trimmed, stored. */
+function getIdentity() { return Store.get(KEYS.identity, null); }
+function saveIdentity(name, code) {
+  const clean = String(name || '').trim().replace(/\s+/g, ' ').slice(0, 24);
+  if (!clean) return null;
+  const id = { name: clean, code: String(code || '').trim().slice(0, 8).toUpperCase() || null,
+               since: new Date().toISOString() };
+  Store.set(KEYS.identity, id);
+  return id;
+}
+
 function ensureWeek() {
   const key = weekKeyFor();
-  if (!week || week.key !== key) {
-    if (week && week.tickets.length) archiveWeek(week);
+  if (!week) { week = blankWeek(key); persist(); return true; }
+  if (week.key !== key) {
+    if (!AUTO_ROLLOVER) return false;      // testing: only the admin rolls the week
+    if (week.tickets.length) archiveWeek(week);
     week = blankWeek(key);
     persist();
     return true;
   }
   return false;
+}
+
+const BLANK_LIFETIME = { bets: 0, won: 0, lost: 0, push: 0, wagered: 0,
+                         profit: 0, weeks: 0, wins: 0, biggestWin: 0, bestFinish: 0 };
+
+/* Lifetime totals are accumulated at archive time and never reset. The
+   weekly bankroll is a format, not a record. */
+function updateLifetime(w) {
+  const lt = Object.assign({}, BLANK_LIFETIME, Store.get(KEYS.lifetime, null) || {});
+  const s = weekStats(w);
+  lt.bets   += w.tickets.length;
+  lt.won    += w.tickets.filter(t => t.status === 'won').length;
+  lt.lost   += w.tickets.filter(t => t.status === 'lost').length;
+  lt.push   += w.tickets.filter(t => t.status === 'push' || t.status === 'void').length;
+  lt.wagered = round2(lt.wagered + s.wagered);
+  lt.profit  = round2(lt.profit + s.realizedPL);
+  lt.weeks  += 1;
+  const best = w.tickets.filter(t => t.status === 'won')
+    .reduce((m, t) => Math.max(m, t.returnAmount - t.stake), 0);
+  lt.biggestWin = round2(Math.max(lt.biggestWin, best));
+  lt.bestFinish = round2(Math.max(lt.bestFinish, s.bankroll));
+  Store.set(KEYS.lifetime, lt);
+  return lt;
 }
 
 function archiveWeek(w) {
@@ -447,8 +501,10 @@ function archiveWeek(w) {
   const best = w.tickets
     .filter(t => t.status === 'won')
     .sort((a, b) => (b.returnAmount - b.stake) - (a.returnAmount - a.stake))[0];
+  updateLifetime(w);
   weekResults.unshift({
     key: w.key, profit: s.realizedPL, hitRate: s.hitRate, betsUsed: s.betsUsed,
+    roi: s.roi, wagered: s.wagered,
     bestTicket: best ? { legs: best.legs.length, odds: best.odds, profit: round2(best.returnAmount - best.stake) } : null
   });
   if (weekResults.length > 12) weekResults.pop();
@@ -730,7 +786,7 @@ function renderBets(status = 'all') {
       <ol class="bet-legs">${t.legs.map(l => `<li>${l.title}${validOdds(l.odds) ? ` <span class="odds">${fmtOdds(l.odds)}</span>` : ''}</li>`).join('')}</ol>
       <div class="bet-card-foot">
         <div><span>Stake</span><strong>${money(t.stake)}</strong></div>
-        <div><span>${t.status === 'won' ? 'Paid' : t.status === 'lost' ? 'Return' : t.status === 'void' ? 'Refunded' : 'To win'}</span><strong>${money(t.returnAmount)}</strong></div>
+        <div><span>${t.status === 'won' ? 'Paid' : t.status === 'lost' ? 'Return' : (t.status === 'void' || t.status === 'push') ? 'Refunded' : 'To win'}</span><strong>${money(t.returnAmount)}</strong></div>
       </div></article>`).join('')
     : '<div class="empty-state">No tickets in this category.</div>';
 
@@ -1140,10 +1196,12 @@ function rivalsForWeek(key) {
     const settled = Math.max(1, betsUsed - Math.floor(rand() * 4));
     const wins = Math.round(settled * (0.28 + rand() * 0.36));
     const profit = round2((rand() - 0.42) * 620);
+    const staked = 40 + Math.floor(rand() * 260);
     return {
       name, betsUsed, profit,
       hitRate: Math.round(wins / settled * 100),
       bankroll: round2(WEEKLY_BANKROLL + profit),
+      roi: round2(100 * profit / staked),
       best: { legs: 2 + Math.floor(rand() * 3), odds: 180 + Math.floor(rand() * 900) }
     };
   });
@@ -1151,8 +1209,9 @@ function rivalsForWeek(key) {
 
 function standings() {
   const s = weekStats(week);
+  const ident = getIdentity();
   const me = {
-    name: 'You', you: true, betsUsed: s.betsUsed, profit: s.realizedPL,
+    name: ident ? ident.name : 'You', you: true, roi: s.roi, betsUsed: s.betsUsed, profit: s.realizedPL,
     hitRate: s.hitRate, bankroll: s.bankroll,
     best: (() => {
       const b = week.tickets.filter(t => t.status === 'won')
@@ -1168,7 +1227,7 @@ function renderCompetition() {
   const table = rows.map((r, i) => `
     <div class="leader-row ${r.you ? 'is-you' : ''}">
       <div class="rank">${i === 0 ? '👑' : `#${i + 1}`}</div>
-      <div><strong>${r.name}</strong><small>${money(r.bankroll)} · ${r.hitRate}% hit · ${r.betsUsed}/${WEEKLY_BET_LIMIT} bets</small></div>
+      <div><strong>${r.name}</strong><small>${money(r.bankroll)} · ${r.hitRate}% hit${typeof r.roi === 'number' ? ` · ${r.roi >= 0 ? '+' : ''}${r.roi.toFixed(0)}% ROI` : ''} · ${r.betsUsed}/${WEEKLY_BET_LIMIT} bets</small></div>
       <div class="profit ${r.profit < 0 ? 'negative' : ''}">${r.profit >= 0 ? '+' : ''}${money(r.profit)}</div>
       <div class="tickets">${r.best ? `${r.best.legs}-leg ${fmtOdds(r.best.odds)}` : '—'}</div>
     </div>`).join('');
@@ -1183,7 +1242,7 @@ function renderCompetition() {
   if (champBox) {
     champBox.innerHTML = `<div class="champ-head"><span class="eyebrow">WEEK OF ${week.key}</span>
         <h2>${champ.you ? 'You are leading this week' : `${champ.name} is leading this week`}</h2>
-        <p class="muted-copy">Ranked by realized profit. Everyone restarts at ${money(WEEKLY_BANKROLL)} Monday 12:00 AM ET.</p></div>
+        <p class="muted-copy">Ranked by realized profit. Everyone restarts at ${money(WEEKLY_BANKROLL)} Tuesday 2:00 AM PT.</p></div>
       <div class="champ-stats">
         <div><span>Profit</span><strong class="profit">${champ.profit >= 0 ? '+' : ''}${money(champ.profit)}</strong></div>
         <div><span>Hit rate</span><strong>${champ.hitRate}%</strong></div>
@@ -2058,6 +2117,28 @@ function renderTicker() {
   if (count) count.textContent = `${games.length} games`;
 }
 
+/* ---------- 12c. First-visit identity ---------- */
+function renderIdentityGate() {
+  const gate = document.getElementById('identityGate');
+  if (!gate) return;
+  if (getIdentity()) { gate.classList.remove('open'); return; }
+  gate.classList.add('open');
+  const input = document.getElementById('identityName');
+  const code = document.getElementById('identityCode');
+  const save = document.getElementById('identitySave');
+  const err = document.getElementById('identityError');
+  const submit = () => {
+    const id = saveIdentity(input.value, code.value);
+    if (!id) { err.textContent = 'Please enter a display name.'; input.focus(); return; }
+    gate.classList.remove('open');
+    renderCompetition();
+    showToast(`Welcome, ${id.name}.`);
+  };
+  save.onclick = submit;
+  input.onkeydown = e => { if (e.key === 'Enter') submit(); };
+  setTimeout(() => input && input.focus && input.focus(), 60);
+}
+
 /* ---------- 13. Feed status + boot ---------- */
 function renderFeedStatus(state, detail) {
   const pill = document.getElementById('feedPill');
@@ -2314,6 +2395,12 @@ function boot() {
   safely('board', loadBoard);
   safely('compare', initCompare);
   safely('nav badges', updateNavBadges);
+  safely('identity', renderIdentityGate);
+  safely('golf event', async () => {
+    await GolfEvent.load();
+    renderGolfEvent();
+    renderAdmin();
+  });
   showBootErrors();
 
   clearInterval(countdownTimer);
@@ -2705,10 +2792,425 @@ async function initCompare() {
   }
 }
 
+
+
+/* ============================================================
+   15. Golf event — private bankroll test (v1.4.4)
+   Self-contained straight-bet flow inside the Trending tab. Uses the
+   same week.tickets store as the NFL slip so My Bets, the leaderboard
+   and the weekly archive all pick these up for free, but keeps its own
+   single-selection slip rather than overloading the parlay builder.
+
+   Everything about the event is editable in data/golf-event.json —
+   name, lock time, golfers, odds — with no code change.
+   ============================================================ */
+const GolfEvent = {
+  data: null,
+  selection: null,          // pending pick, pre-confirmation
+  async load() {
+    if (this.data) return this.data;
+    if (window.VIG_GOLF_EVENT) { this.data = window.VIG_GOLF_EVENT; return this.data; }
+    const res = await fetch('data/golf-event.json');
+    if (!res.ok) throw new Error(`golf event ${res.status}`);
+    this.data = await res.json();
+    return this.data;
+  },
+  market() { return this.data && this.data.markets && this.data.markets[0]; },
+  selections() { const m = this.market(); return (m && m.selections) || []; },
+  find(id) { return this.selections().find(s => s.selectionId === id) || null; },
+  /* admin overrides persist; the file stays the source of truth for odds */
+  state() {
+    const saved = Store.get(KEYS.golf, null);
+    const base = { status: (this.data && this.data.status) || 'open', winner: null, settledAt: null };
+    return Object.assign(base, saved || {});
+  },
+  setState(patch) {
+    const next = Object.assign(this.state(), patch);
+    Store.set(KEYS.golf, next);
+    return next;
+  },
+  /* locked by the clock OR by an admin flip, whichever comes first */
+  isLocked() {
+    const st = this.state();
+    if (st.status === 'locked' || st.status === 'final') return true;
+    const lock = this.data && this.data.lockTime ? new Date(this.data.lockTime).getTime() : 0;
+    return lock ? Date.now() >= lock : false;
+  },
+  isFinal() { return this.state().status === 'final'; }
+};
+
+function golfTickets(all) {
+  return (all || week.tickets).filter(t => t.kind === 'golf');
+}
+
+function fmtEventDate(iso) {
+  try {
+    return new Date(iso).toLocaleDateString(undefined,
+      { weekday: 'short', month: 'short', day: 'numeric' });
+  } catch (e) { return iso; }
+}
+
+function renderGolfEvent() {
+  const box = document.getElementById('golfEvent');
+  if (!box) return;
+  if (!GolfEvent.data) {
+    box.innerHTML = '<div class="empty-state">Golf event unavailable. Check data/golf-event.json.</div>';
+    return;
+  }
+  const ev = GolfEvent.data;
+  const st = GolfEvent.state();
+  const locked = GolfEvent.isLocked();
+  const final = GolfEvent.isFinal();
+  const s = weekStats(week);
+  const statusLabel = final ? 'Final' : locked ? 'Locked' : 'Open';
+  const lockMs = ev.lockTime ? new Date(ev.lockTime).getTime() - Date.now() : 0;
+
+  const rows = GolfEvent.selections().map(sel => {
+    const mine = golfTickets().filter(t => t.selectionId === sel.selectionId)
+                              .reduce((a, t) => a + t.stake, 0);
+    const won = final && st.winner === sel.selectionId;
+    return `<div class="golf-row ${won ? 'winner' : ''}">
+      <div class="golf-name"><strong>${sel.name}</strong>
+        ${sel.note ? `<small>${sel.note}</small>` : ''}
+        ${mine ? `<small class="golf-mine">${money(mine)} on this</small>` : ''}</div>
+      <span class="odds">${fmtOdds(sel.americanOdds)}</span>
+      ${locked
+        ? `<span class="golf-locked">${won ? 'WON' : '—'}</span>`
+        : `<button class="add-btn" data-golf-pick="${sel.selectionId}">Add</button>`}
+    </div>`;
+  }).join('');
+
+  box.innerHTML = `
+    <section class="panel golf-panel">
+      <div class="golf-head">
+        <div>
+          <span class="eyebrow">${GolfEvent.market() ? GolfEvent.market().name.toUpperCase() : 'TOURNAMENT WINNER'}</span>
+          <h2>${ev.name}</h2>
+          <p class="muted-copy">${fmtEventDate(ev.startTime)} – ${fmtEventDate(ev.endTime)}${ev.venue ? ` · ${ev.venue}` : ''}</p>
+        </div>
+        <div class="golf-status">
+          <span class="status-pill ${statusLabel.toLowerCase()}">${statusLabel}</span>
+          <small>${final ? 'Settled' : locked ? 'Betting closed' : (lockMs > 0 ? `Locks in ${fmtCountdown(lockMs)}` : 'Locks at start')}</small>
+        </div>
+      </div>
+      <div class="golf-bankroll">
+        <div><span>Virtual bankroll</span><strong>${money(s.bankroll)}</strong></div>
+        <div><span>At risk</span><strong>${money(s.atRisk)}</strong></div>
+        <div><span>Bets left</span><strong>${s.betsLeft} of ${WEEKLY_BET_LIMIT}</strong></div>
+      </div>
+      <p class="golf-notice">VIG is a free sports prediction game using virtual funds.
+        No real-money wagering, deposits, withdrawals, or cash prizes are offered.</p>
+      <div class="golf-list">${rows}</div>
+    </section>
+    <div id="golfSlip"></div>`;
+
+  box.querySelectorAll('[data-golf-pick]').forEach(b => b.onclick = () => {
+    GolfEvent.selection = b.dataset.golfPick;
+    renderGolfSlip();
+    const slip = document.getElementById('golfSlip');
+    if (slip && slip.scrollIntoView) slip.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+  renderGolfSlip();
+}
+
+const GOLF_STAKES = [10, 25, 50, 100];
+
+function renderGolfSlip() {
+  const box = document.getElementById('golfSlip');
+  if (!box) return;
+  const sel = GolfEvent.selection && GolfEvent.find(GolfEvent.selection);
+  if (!sel) { box.innerHTML = ''; return; }
+  const s = weekStats(week);
+  /* `|| 25` would swallow a deliberate 0 and silently substitute the default,
+     so the minimum-stake validation could never fire. */
+  const rawStake = Store.get(KEYS.golfStake, 25);
+  const stake = (typeof rawStake === 'number' && isFinite(rawStake) && rawStake >= 0)
+    ? rawStake : 25;
+  const dec = decimalOdds(sel.americanOdds);
+  const profit = stake * (dec - 1);
+  const total = stake + profit;
+  const after = round2(week.bankroll - stake);
+
+  let error = '';
+  if (!(stake >= 1)) error = 'Minimum virtual stake is $1.';
+  else if (stake > week.bankroll) error = `Stake exceeds your virtual bankroll of ${money(week.bankroll)}.`;
+  else if (s.betsLeft <= 0) error = `You have used all ${WEEKLY_BET_LIMIT} bets this week.`;
+  else if (GolfEvent.isLocked()) error = 'Betting is closed for this event.';
+
+  box.innerHTML = `<section class="panel golf-slip">
+    <div class="panel-head"><div><span class="eyebrow">BET SLIP</span><h2>${sel.name}</h2>
+      <p class="muted-copy">${GolfEvent.data.name} · ${GolfEvent.market().name}</p></div>
+      <button class="text-btn" id="golfClear">Clear</button></div>
+    <div class="golf-slip-grid">
+      <div><span>Odds</span><strong class="odds">${fmtOdds(sel.americanOdds)}</strong></div>
+      <div><span>Potential profit</span><strong>${money(profit)}</strong></div>
+      <div><span>Total return</span><strong>${money(total)}</strong></div>
+      <div><span>Bankroll after</span><strong>${money(Math.max(0, after))}</strong></div>
+    </div>
+    <label class="golf-stake-label">Virtual stake
+      <input id="golfStake" type="number" min="1" step="1" value="${stake}" inputmode="numeric">
+    </label>
+    <div class="golf-stake-quick">
+      ${GOLF_STAKES.map(v => `<button class="secondary ${v === stake ? 'active' : ''}" data-golf-stake="${v}">$${v}</button>`).join('')}
+    </div>
+    ${error ? `<p class="golf-error">${error}</p>` : ''}
+    <button class="full primary" id="golfPlace" ${error ? 'disabled' : ''}>
+      ${error ? 'Cannot place' : `Review ${money(stake)} mock bet`}</button>
+    <p class="disclaimer">Mock bet using virtual funds. Odds are locked in at submission.</p>
+  </section>`;
+
+  const input = document.getElementById('golfStake');
+  input.oninput = () => { Store.set(KEYS.golfStake, (input.value === '' ? 0 : Number(input.value))); renderGolfSlip(); };
+  box.querySelectorAll('[data-golf-stake]').forEach(b => b.onclick = () => {
+    Store.set(KEYS.golfStake, Number(b.dataset.golfStake));
+    renderGolfSlip();
+  });
+  document.getElementById('golfClear').onclick = () => { GolfEvent.selection = null; renderGolfSlip(); };
+  const place = document.getElementById('golfPlace');
+  if (place && !error) place.onclick = () => confirmGolfBet(sel, stake, profit, total);
+}
+
+/* Explicit confirmation, per the test spec — a mock bet still commits
+   bankroll and a bet count, so it should not be a single tap. */
+function confirmGolfBet(sel, stake, profit, total) {
+  const msg = `Place a mock bet?\n\n${sel.name} to win ${GolfEvent.data.name}`
+    + `\nOdds ${fmtOdds(sel.americanOdds)}`
+    + `\nVirtual stake ${money(stake)}`
+    + `\nPotential return ${money(total)}`
+    + `\n\nVirtual funds only. No real money is involved.`;
+  const go = (typeof window.confirm === 'function') ? window.confirm(msg) : true;
+  if (!go) return;
+  placeGolfBet(sel, stake, total);
+}
+
+function placeGolfBet(sel, stake, total) {
+  const s = weekStats(week);
+  if (GolfEvent.isLocked()) { showToast('Betting is closed for this event.'); return; }
+  if (s.betsLeft <= 0) { showToast(`Weekly limit of ${WEEKLY_BET_LIMIT} bets reached.`); return; }
+  if (!(stake >= 1) || stake > week.bankroll) { showToast('Invalid virtual stake.'); return; }
+
+  week.tickets.unshift({
+    id: `VIG-G-${Date.now().toString(36).toUpperCase()}`,
+    kind: 'golf',
+    eventId: GolfEvent.data.eventId,
+    marketId: GolfEvent.market().marketId,
+    selectionId: sel.selectionId,
+    date: new Date().toLocaleString(undefined,
+      { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }),
+    placedAt: new Date().toISOString(),
+    status: 'open',
+    stake,
+    odds: sel.americanOdds,             // frozen at submission, never recalculated
+    returnAmount: round2(total),
+    legs: [{ title: `${sel.name} — ${GolfEvent.market().name}`, odds: sel.americanOdds, gameId: null }]
+  });
+  week.bankroll = round2(week.bankroll - stake);
+  GolfEvent.selection = null;
+  persist();
+  renderGolfEvent();
+  updateDashboard();
+  renderBets(activeBetFilter());
+  renderCompetition();
+  showToast(`Mock bet placed. ${weekStats(week).betsLeft} of ${WEEKLY_BET_LIMIT} left.`);
+}
+
+/* ---- settlement -------------------------------------------------
+   Idempotent by construction: only tickets still 'open' are touched,
+   and each records settledAt. Clicking settle twice pays nobody twice.
+------------------------------------------------------------------ */
+function settleGolfEvent(winnerId, { push = false } = {}) {
+  const open = golfTickets().filter(t => t.status === 'open'
+    && t.eventId === GolfEvent.data.eventId);
+  if (!open.length) return { settled: 0, paid: 0 };
+  let paid = 0;
+  open.forEach(t => {
+    if (push) {
+      t.status = 'push';
+      t.returnAmount = t.stake;                 // stake back, no profit
+      week.bankroll = round2(week.bankroll + t.stake);
+      paid += t.stake;
+    } else if (t.selectionId === winnerId) {
+      t.status = 'won';                          // stake + profit returned
+      week.bankroll = round2(week.bankroll + t.returnAmount);
+      paid += t.returnAmount;
+    } else {
+      t.status = 'lost';                         // stake already deducted
+      t.returnAmount = 0;
+    }
+    t.settledAt = new Date().toISOString();
+  });
+  week.history.push(round2(week.bankroll));
+  if (week.history.length > 40) week.history.shift();
+  GolfEvent.setState({ status: 'final', winner: push ? null : winnerId, settledAt: new Date().toISOString() });
+  persist();
+  return { settled: open.length, paid: round2(paid) };
+}
+
+
+
+/* ============================================================
+   16. Test-admin controls (v1.4.4)
+   Hidden behind ?admin=1 — deliberately not a button anyone can find
+   by accident. Everything here is destructive-ish, so each action
+   confirms first and settlement is idempotent.
+   ============================================================ */
+const Admin = {
+  enabled() {
+    try {
+      if (new URLSearchParams(location.search).get('admin') === '1') {
+        Store.set('vig.v2.admin', true);
+      }
+      return Store.get('vig.v2.admin', false) === true;
+    } catch (e) { return false; }
+  },
+  disable() { Store.set('vig.v2.admin', false); }
+};
+
+function renderAdmin() {
+  const box = document.getElementById('adminPanel');
+  if (!box) return;
+  if (!Admin.enabled() || !GolfEvent.data) { box.hidden = true; return; }
+  box.hidden = false;
+  const st = GolfEvent.state();
+  const open = golfTickets().filter(t => t.status === 'open').length;
+  const graded = golfTickets().filter(t => t.status !== 'open').length;
+  const lt = Store.get(KEYS.lifetime, null);
+
+  box.innerHTML = `
+    <div class="panel-head"><div><span class="eyebrow">TEST ADMIN</span>
+      <h2>Settlement controls</h2>
+      <p class="muted-copy">Private beta only. Event status <strong>${st.status}</strong> ·
+        ${open} open golf bet${open === 1 ? '' : 's'} · ${graded} settled</p></div>
+      <button class="text-btn" id="adminHide">Hide</button></div>
+
+    <div class="admin-grid">
+      <div class="admin-block">
+        <h3>Event status</h3>
+        <div class="admin-actions">
+          <button class="secondary" data-admin-status="open"   ${st.status === 'open' ? 'disabled' : ''}>Open</button>
+          <button class="secondary" data-admin-status="locked" ${st.status === 'locked' ? 'disabled' : ''}>Lock</button>
+        </div>
+      </div>
+
+      <div class="admin-block">
+        <h3>Settle tournament</h3>
+        <label>Winning golfer
+          <select id="adminWinner">
+            <option value="">— choose —</option>
+            ${GolfEvent.selections().map(s =>
+              `<option value="${s.selectionId}" ${st.winner === s.selectionId ? 'selected' : ''}>${s.name} (${fmtOdds(s.americanOdds)})</option>`).join('')}
+          </select></label>
+        <div class="admin-actions">
+          <button class="primary" id="adminSettle" ${open ? '' : 'disabled'}>Settle ${open} bet${open === 1 ? '' : 's'}</button>
+          <button class="secondary" id="adminPush" ${open ? '' : 'disabled'}>Void as push</button>
+        </div>
+        ${st.settledAt ? `<p class="admin-note">Settled ${new Date(st.settledAt).toLocaleString()}. Settling again pays nobody twice.</p>` : ''}
+      </div>
+
+      <div class="admin-block">
+        <h3>Weekly cycle</h3>
+        <p class="admin-note">Automatic rollover is <strong>${AUTO_ROLLOVER ? 'on' : 'paused for testing'}</strong>.</p>
+        <div class="admin-actions">
+          <button class="secondary" id="adminFinalize">Finalize week</button>
+          <button class="secondary" id="adminNewWeek">Start new week</button>
+        </div>
+        ${lt ? `<p class="admin-note">Lifetime: ${lt.bets} bets · ${lt.won}W ${lt.lost}L ${lt.push}P ·
+          ${lt.profit >= 0 ? '+' : ''}${money(lt.profit)} · ${lt.weeks} week${lt.weeks === 1 ? '' : 's'} archived</p>` : ''}
+      </div>
+
+      <div class="admin-block danger">
+        <h3>Reset test data</h3>
+        <p class="admin-note">Clears this week's bets and the event result. Lifetime stats are kept.</p>
+        <div class="admin-actions">
+          <button class="secondary" id="adminUndo">Undo settlement</button>
+          <button class="secondary" id="adminReset">Reset test</button>
+        </div>
+      </div>
+    </div>`;
+
+  const rerender = () => { renderGolfEvent(); updateDashboard(); renderBets(activeBetFilter());
+                           renderCompetition(); renderAdmin(); };
+
+  box.querySelectorAll('[data-admin-status]').forEach(b => b.onclick = () => {
+    GolfEvent.setState({ status: b.dataset.adminStatus });
+    rerender();
+    showToast(`Event set to ${b.dataset.adminStatus}.`);
+  });
+
+  document.getElementById('adminSettle').onclick = () => {
+    const w = document.getElementById('adminWinner').value;
+    if (!w) { showToast('Choose the winning golfer first.'); return; }
+    const name = (GolfEvent.find(w) || {}).name || w;
+    if (!confirm(`Settle all open golf bets with ${name} as the winner?\n\nThis pays winners and marks the rest lost.`)) return;
+    const r = settleGolfEvent(w);
+    rerender();
+    showToast(`Settled ${r.settled} bet${r.settled === 1 ? '' : 's'}, ${money(r.paid)} returned.`);
+  };
+
+  document.getElementById('adminPush').onclick = () => {
+    if (!confirm('Void all open golf bets as push?\n\nEvery stake is returned with no profit.')) return;
+    const r = settleGolfEvent(null, { push: true });
+    rerender();
+    showToast(`${r.settled} bet${r.settled === 1 ? '' : 's'} pushed, ${money(r.paid)} returned.`);
+  };
+
+  document.getElementById('adminFinalize').onclick = () => {
+    const s = weekStats(week);
+    if (s.openCount && !confirm(`${s.openCount} bet${s.openCount === 1 ? ' is' : 's are'} still open.\n\nFinalizing voids them and refunds the stakes. Continue?`)) return;
+    if (!confirm('Finalize this week? Results are archived and lifetime stats updated.')) return;
+    archiveWeek(week);
+    persist();
+    rerender();
+    showToast('Week finalized and archived.');
+  };
+
+  document.getElementById('adminNewWeek').onclick = () => {
+    if (!confirm(`Start a new week?\n\nEveryone returns to ${money(WEEKLY_BANKROLL)} with ${WEEKLY_BET_LIMIT} bets. Archived weeks and lifetime stats are kept.`)) return;
+    week = blankWeek(weekKeyFor());
+    GolfEvent.setState({ status: (GolfEvent.data && GolfEvent.data.status) || 'open', winner: null, settledAt: null });
+    persist();
+    rerender();
+    showToast(`New week started at ${money(WEEKLY_BANKROLL)}.`);
+  };
+
+  document.getElementById('adminUndo').onclick = () => {
+    if (!confirm('Undo settlement?\n\nGolf bets return to open and the payouts are reversed.')) return;
+    let reversed = 0;
+    golfTickets().filter(t => t.settledAt).forEach(t => {
+      if (t.status === 'won' || t.status === 'push') week.bankroll = round2(week.bankroll - t.returnAmount);
+      if (t.status === 'lost') t.returnAmount = round2(t.stake * decimalOdds(t.odds));
+      t.status = 'open';
+      delete t.settledAt;
+      reversed++;
+    });
+    GolfEvent.setState({ status: 'open', winner: null, settledAt: null });
+    persist();
+    rerender();
+    showToast(`${reversed} bet${reversed === 1 ? '' : 's'} reopened.`);
+  };
+
+  document.getElementById('adminReset').onclick = () => {
+    if (!confirm('Reset the test?\n\nThis week\'s bets are cleared and the event reopened. Lifetime stats and archived weeks are kept.')) return;
+    week = blankWeek(weekKeyFor());
+    GolfEvent.setState({ status: (GolfEvent.data && GolfEvent.data.status) || 'open', winner: null, settledAt: null });
+    persist();
+    rerender();
+    showToast('Test data reset.');
+  };
+
+  document.getElementById('adminHide').onclick = () => {
+    Admin.disable();
+    renderAdmin();
+    showToast('Admin hidden. Re-open with ?admin=1');
+  };
+}
+
 /* Debug handle. Open the console and poke at VIG.Fantasy.profile(...)
    or VIG.DataSource.mode while working on this. */
 window.VIG = { Fantasy, Store, DataSource, weekStats, SCORING, METRIC_DEFS,
-               get bootErrors() { return bootErrors; },
+               get bootErrors() { return bootErrors; }, tzParts, weekKeyFor, nextResetAt, RESET_TZ, RESET_HOUR,
+               GolfEvent, Admin, settleGolfEvent, golfTickets, getIdentity, saveIdentity, archiveWeek, blankWeek,
+               updateLifetime, AUTO_ROLLOVER, renderGolfEvent, renderAdmin,
                ROSTER_SLOTS, DRAFT_ROUNDS, assignSlot, ordinal, buildDraftPool,
                gradeDraft, letterFor, slotLetterFor, GRADE_SCALE, SLOT_SCALE, POSITION_LIMITS, positionWeights, DRAFT_DEPTH,
                ROUND_WEIGHTS, roundWeight, closingMessage, renderTicker, fmtGameTime,

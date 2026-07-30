@@ -1,0 +1,29 @@
+{
+  "eventId": "vig-golf-test-001",
+  "name": "VIG Founders Golf Test",
+  "venue": "Private beta event",
+  "startTime": "2026-08-06T08:00:00-04:00",
+  "lockTime": "2026-08-06T08:00:00-04:00",
+  "endTime": "2026-08-09T19:00:00-04:00",
+  "status": "open",
+  "markets": [
+    {
+      "marketId": "tournament-winner",
+      "name": "Tournament Winner",
+      "selections": [
+        { "selectionId": "g-scheffler", "name": "Scottie Scheffler",  "americanOdds": 450,   "note": "World No. 1" },
+        { "selectionId": "g-mcilroy",   "name": "Rory McIlroy",       "americanOdds": 900 },
+        { "selectionId": "g-schauffele","name": "Xander Schauffele",  "americanOdds": 1200 },
+        { "selectionId": "g-morikawa",  "name": "Collin Morikawa",    "americanOdds": 1400 },
+        { "selectionId": "g-aberg",     "name": "Ludvig Aberg",       "americanOdds": 1600 },
+        { "selectionId": "g-hovland",   "name": "Viktor Hovland",     "americanOdds": 2000 },
+        { "selectionId": "g-cantlay",   "name": "Patrick Cantlay",    "americanOdds": 2500 },
+        { "selectionId": "g-thomas",    "name": "Justin Thomas",      "americanOdds": 2800 },
+        { "selectionId": "g-fleetwood", "name": "Tommy Fleetwood",    "americanOdds": 3300 },
+        { "selectionId": "g-griffin",   "name": "Ben Griffin",        "americanOdds": 8000 },
+        { "selectionId": "g-clark",     "name": "Wyndham Clark",      "americanOdds": 9000 },
+        { "selectionId": "g-field",     "name": "The Field",          "americanOdds": -110, "note": "any golfer not listed" }
+      ]
+    }
+  ]
+}
