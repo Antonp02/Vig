@@ -365,7 +365,11 @@ function bookSpread(team) {
 
 const DataSource = {
   mode: Store.get(KEYS.mode, 'mock'),
-  endpoint: '/api/odds',
+  /* relative so the app works both at a domain root (Vercel) and under a
+     subpath (GitHub Pages at /Vig/). Pages has no serverless functions, so
+     this 404s there — which the catch below already handles by falling back
+     to the simulated board. */
+  endpoint: 'api/odds',
   async fetchGames() {
     if (this.mode !== 'live') return mockGames();
     const res = await fetch(this.endpoint, { headers: { accept: 'application/json' } });
