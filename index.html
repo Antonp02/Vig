@@ -41,8 +41,8 @@
   <button class="sync-chip" id="syncChip" hidden></button>
   <button class="account-chip" id="accountChip" hidden></button>
   <div class="account-actions">
-    <button class="auth-btn login-trigger" data-auth-mode="login">Log in</button>
-    <button class="auth-btn auth-primary login-trigger" data-auth-mode="signup">Sign up</button>
+    <button class="auth-btn" id="headerSignIn">Log in</button>
+    <button class="auth-btn auth-primary" id="headerSignUp">Sign up</button>
   </div>
   <div class="profile-wrap">
     <button class="profile-btn" id="profileToggle" aria-expanded="false" aria-label="Your profile"><span class="avatar sm" id="profileAvatar">V</span><span>⌄</span></button>
@@ -171,19 +171,6 @@
     <section class="panel member-panel"><div class="panel-head"><div><span class="eyebrow">THIS WEEK</span><h2>League standings</h2></div><span class="updated">Ranked by realized profit</span></div><div id="friendsRanking" class="leaderboard-card"></div></section>
   </section>
 </main>
-<div class="auth-modal" id="authModal" aria-hidden="true">
-  <div class="auth-backdrop" data-close-auth></div>
-  <section class="auth-card" role="dialog" aria-modal="true" aria-labelledby="authTitle">
-    <button class="auth-close" data-close-auth aria-label="Close">×</button>
-    <div class="auth-brand"><div class="logo small"><span class="logo-v">V</span><span class="logo-cut"></span></div><div><strong>VIG</strong><span>Mock Sports Book · Fantasy Tools</span></div></div>
-    <span class="eyebrow" id="authEyebrow">WELCOME BACK</span><h2 id="authTitle">Log in to your account</h2><p id="authCopy">Track your tickets, bankroll, groups, and Line Winder watchlists.</p>
-    <label>Email address<input id="authEmail" type="email" placeholder="you@example.com" autocomplete="email"></label>
-    <label>Password<input id="authPassword" type="password" placeholder="Enter your password" autocomplete="current-password"></label>
-    <button class="full primary" id="authSubmit">Log in</button>
-    <button class="auth-switch" id="authSwitch">New to VIG? Create an account</button>
-    <small>Prototype authentication only. Account storage will be connected before launch.</small>
-  </section>
-</div>
 <footer class="site-foot">Player statistics from <a href="https://github.com/nflverse/nflverse-data" rel="noopener">nflverse</a> (CC-BY 4.0). VIG is a mock sports book — odds and all betting behaviour are simulated. No real-money wagering.</footer>
 <div class="slip-bar" id="slipBar" hidden>
   <button class="slip-bar-main" id="slipBarOpen">

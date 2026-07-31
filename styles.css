@@ -660,3 +660,4 @@ button,select,input,a{touch-action:manipulation}
 .live-dot.warn{background:var(--gold);box-shadow:0 0 0 4px rgba(232,189,105,.15)}
 .live-dot.off{background:var(--line)}
 @media(max-width:700px){.bets-live .text-btn{min-height:38px}}
+.account-actions[hidden]{display:none}

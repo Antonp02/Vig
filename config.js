@@ -13,6 +13,6 @@
    Never put the service_role key here.
 ----------------------------------------------------------------- */
 window.VIG_CONFIG = {
-  SUPABASE_URL: 'https://jauikslookwsvktlzdbq.supabase.co',
-  SUPABASE_ANON_KEY: 'sb_publishable_FzHJkfp3m9XFTbyvs56phg_pJaZtI8S'
+  SUPABASE_URL: '',
+  SUPABASE_ANON_KEY: ''
 };

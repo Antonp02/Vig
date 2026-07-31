@@ -2797,41 +2797,23 @@ function wireUp() {
   const manageMembers = document.getElementById('manageMembers');
   if (manageMembers) manageMembers.addEventListener('click', () => showToast('Member management is planned for account-enabled beta.'));
 
-  const authModal = document.getElementById('authModal');
-  let authMode = 'login';
-  function setAuthMode(mode) {
-    authMode = mode;
-    const s = mode === 'signup';
-    document.getElementById('authEyebrow').textContent = s ? 'JOIN THE MARKET' : 'WELCOME BACK';
-    document.getElementById('authTitle').textContent = s ? 'Create your VIG account' : 'Log in to your account';
-    document.getElementById('authCopy').textContent = s
-      ? 'Save picks, join private groups, and build your betting record.'
-      : 'Track your tickets, bankroll, groups, and Line Winder watchlists.';
-    document.getElementById('authSubmit').textContent = s ? 'Create account' : 'Log in';
-    document.getElementById('authSwitch').textContent = s ? 'Already have an account? Log in' : 'New to VIG? Create an account';
-    document.getElementById('authPassword').setAttribute('autocomplete', s ? 'new-password' : 'current-password');
-  }
-  function closeAuth() {
-    authModal.classList.remove('open');
-    authModal.setAttribute('aria-hidden', 'true');
-  }
-  document.querySelectorAll('.login-trigger').forEach(b => b.addEventListener('click', () => {
-    setAuthMode(b.dataset.authMode || 'login');
-    authModal.classList.add('open');
-    authModal.setAttribute('aria-hidden', 'false');
-    setTimeout(() => document.getElementById('authEmail').focus(), 50);
-  }));
-  document.querySelectorAll('[data-close-auth]').forEach(b => b.addEventListener('click', closeAuth));
-  document.getElementById('authSwitch').addEventListener('click', () => setAuthMode(authMode === 'login' ? 'signup' : 'login'));
-  document.getElementById('authSubmit').addEventListener('click', () => {
-    if (!document.getElementById('authEmail').value.trim() || !document.getElementById('authPassword').value) {
-      showToast('Enter an email and password to continue.');
-      return;
-    }
-    closeAuth();
-    showToast(authMode === 'signup' ? 'Prototype account created.' : 'Prototype login successful.');
+  /* v1.5.7: the v0.5 prototype modal is gone. It sat alongside the real
+     Supabase gate, so there were two ways to sign in and one of them was
+     theatre — it validated nothing, stored nothing, and reported success
+     regardless. The header buttons now open the live gate. */
+  const headerIn = document.getElementById('headerSignIn');
+  if (headerIn) headerIn.addEventListener('click', () => {
+    authMode2 = 'signin';
+    openAuth('Sign in to save your bets.');
   });
-  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeAuth(); });
+  const headerUp = document.getElementById('headerSignUp');
+  if (headerUp) headerUp.addEventListener('click', () => {
+    authMode2 = 'signup';
+    openAuth('Create an account to place mock bets.');
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && !needsProfile()) closeAuth2();
+  });
 
   const ad = document.getElementById('openReplayAd');
   if (ad) ad.addEventListener('click', () => {
@@ -4658,6 +4640,10 @@ function renderHeaderAvatar() {
 
 function renderAccountChip() {
   const chip = document.getElementById('accountChip');
+  const actions = document.querySelector('.account-actions');
+  /* Log in / Sign up only make sense when there is an account system and you
+     are not already in it. */
+  if (actions) actions.hidden = !Cloud.enabled() || Cloud.signedIn();
   if (!chip) return;
   if (!Cloud.enabled()) { chip.hidden = true; return; }
   chip.hidden = false;

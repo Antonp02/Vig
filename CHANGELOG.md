@@ -4,6 +4,36 @@ Newest first. Full technical detail lives in `README.md`.
 
 ---
 
+## v1.5.7 — Prototype auth removed
+
+**Fixed**
+- **There were two ways to sign in and one of them was theatre.** The v0.5
+  prototype modal was still in the markup alongside the live Supabase gate. It
+  validated nothing, stored nothing, created no account, and reported success
+  regardless — while carrying the line "Prototype authentication only. Account
+  storage will be connected before launch." With Supabase live, that modal was
+  actively misleading: a user could "log in" and believe they had an account.
+  Deleted entirely, markup and JavaScript.
+- The header **Log in** and **Sign up** buttons now open the real gate, landing
+  on the sign-in and create-account tabs respectively.
+- Those buttons now **hide once you are signed in**, and hide completely when no
+  backend is configured — there is nothing to log in to in local mode.
+- Escape closes the gate, except during the display-name step, where a signed-in
+  user without a name would be invisible on the leaderboard.
+
+**Changed**
+- Service worker cache to `v1.5.7`.
+
+**Notes**
+- 24 new assertions specifically checking the prototype is gone — no `authModal`,
+  no `login-trigger`, no "Prototype login successful" anywhere in the shipped
+  file, and exactly one auth surface in the DOM.
+- This is the kind of thing that survives because it still *works*. It rendered,
+  it accepted input, it showed a toast. Nothing failed loudly enough to notice
+  until a real account system sat beside it.
+
+---
+
 ## v1.5.6 — Live bet tracking, and five bugs in the betting flow
 
 **Added**
