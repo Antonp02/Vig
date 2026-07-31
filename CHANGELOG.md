@@ -4,6 +4,123 @@ Newest first. Full technical detail lives in `README.md`.
 
 ---
 
+## v1.5.1 — Offline retry, passwords, real golf field, cleaner home
+
+**Added**
+- **Outbox for offline bets.** A bet that cannot reach the database is queued
+  instead of being lost. It retries when the connection returns, when you sign
+  in, every two minutes, and on demand from a "bets waiting to sync" chip in the
+  header.
+- **Email + password sign-in** alongside the magic link, so the same account
+  opens on any device. Create-account and sign-in tabs, forgot-password, and
+  "email me a link instead" as a no-password alternative.
+- **Clickable profile card.** Tapping the header avatar opens a compact card with
+  bankroll, week P/L, ROI and all-time profit, plus an avatar editor: eight brand
+  colours and twelve badges. Stored per user, synced to `profiles` when signed
+  in. No image uploads, so no storage bucket and it works offline.
+- Real golf field: **20 selections** from Cantlay +700 through a +3000/+4000/+5000
+  ladder, with The Field at +250. Book margin 12.1%.
+
+**Changed**
+- Home page: the hero headline moves off flat white to a silver-to-blue gradient
+  with the emphasised half in brand blue, matching the logo. Supporting copy
+  trimmed to one line, and the card background warmed toward the brand palette.
+- Service worker cache bumped to `v1.5.1`.
+
+**Fixed**
+- **Bets placed offline used to vanish.** `syncFromCloud()` replaced the local
+  ticket list with the database's version, so anything queued locally was
+  overwritten the next time the server answered. The queue is now flushed
+  *before* the pull, and anything still pending is merged on top rather than
+  discarded.
+- **The parlay slip let you tap Place with a stake larger than your bankroll**,
+  then bounced you off a toast. It now disables and explains, matching the golf
+  slip. Root cause: the stake field only re-ran the payout calculation, never the
+  validation.
+- The profile menu never rebuilt on open, so bankroll and ROI could be stale.
+
+**Verified**
+- Full odds-maths audit: American ↔ decimal conversions, round-trip over every
+  value from −2000 to +2000, implied probability, de-vigging, payout formulas
+  for both signs, money rounding, and bankroll derivation across won / lost /
+  push / void / mixed books. 33 assertions, all passing.
+- A parlay is quoted at a rounded American price and **pays from that quoted
+  price**, never from the raw decimal product — which is how a real book behaves.
+  Confirmed the quoted price never pays more than the underlying maths.
+
+**Known issues**
+- Settlement writes one row at a time; fine for a dozen testers.
+- The outbox retries indefinitely and never gives up. A bet rejected for a real
+  reason (rather than a network failure) would retry forever.
+- Non-golf tickets still settle on a weighted coin flip.
+
+---
+
+## v1.5.0 — Accounts
+
+**Added**
+- **Supabase accounts** with email magic-link sign-in. No passwords, no reset
+  flow, nothing to breach.
+- **Optional signup.** Fantasy tools, Line Winder and Trending stay open to
+  everyone. An account is required only where identity is genuinely needed:
+  placing a mock bet, My Bets, and the leaderboard. The sheet always says which
+  action prompted it and can be dismissed.
+- **Real shared leaderboard** — your friends finally see each other. Generated
+  rivals remain only as a clearly labelled demo when signed out.
+- Account chip in the header showing sign-in state and display name.
+- Signup count in the admin panel.
+- `supabase/schema.sql` — four tables, ten RLS policies, four security-definer
+  functions. `SUPABASE-SETUP.md` walks through the ten-minute setup.
+
+**Changed**
+- **Bankroll is now derived, never stored.** It is computed from the bets
+  themselves — `1000 − staked + returns` — both locally and in the database.
+  There is no balance field anywhere for anyone to edit.
+- All-time ROI and lifetime figures are queries over the bets table rather than
+  stored counters, so they cannot drift and a settlement correction propagates
+  automatically.
+- Service worker cache bumped to `v1.5.0`; `config.js` added to the precache.
+
+**Security**
+- Users may **insert** their own bets but have **no update policy**. Settlement
+  is admin-only. Without that, anyone with browser devtools could set
+  `status = 'won'` and pay themselves.
+- The email lives in Supabase's `auth.users` and is **never copied into our own
+  tables**. `profiles` holds a display name, an optional league code and a UUID.
+  Verified by test.
+- The leaderboard is a security-definer function returning summary rows only, so
+  aggregating across users never exposes anyone's individual bets.
+
+**Fixed**
+- **A paused free-tier project made returning users look brand new.** Supabase
+  reads the session from local storage, so the app still believed the user was
+  signed in — but the profile query failed, `profile` came back null, and the app
+  concluded they had no account and demanded a display name they already had,
+  with no way to dismiss it. Now `profileUnknown` distinguishes "no profile row"
+  from "the database did not answer": the user gets a plain explanation, a retry
+  button, and can keep playing offline. A failed sync also no longer wipes the
+  local ticket list.
+- The sign-in sheet was being forced open during boot: `renderIdentityGate()`
+  ran synchronously while `Cloud.init()` was still loading the SDK, took the
+  local branch, and never closed once cloud mode took over — making an optional
+  signup feel mandatory.
+- The account chip did not refresh after saving a profile.
+
+**Known issues**
+- Settlement writes one row at a time. Fine for a dozen testers; would want a
+  single RPC at scale.
+- A bet placed while offline saves locally and is not retried against the
+  database. It shows a toast saying so.
+- Non-golf tickets still settle on a weighted coin flip rather than real
+  results.
+- Free-tier Supabase projects pause after 7 days with **no database queries** —
+  and everything open to signed-out visitors (Fantasy, Line Winder, Trending) is
+  served from static files and touches the database not at all. So the site can
+  be visited daily and still pause if nobody signs in. Handled gracefully now,
+  but resolved properly by the v1.6 snapshot cron, or an uptime pinger meanwhile.
+
+---
+
 ## v1.4.4 — Private Golf Bankroll Test
 
 **Added**

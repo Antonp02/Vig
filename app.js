@@ -14,7 +14,9 @@ const KEYS = {
   golf:      'vig.v2.golf',
   golfStake: 'vig.v2.golfStake',
   identity:  'vig.v2.identity',
-  lifetime:  'vig.v2.lifetime'
+  lifetime:  'vig.v2.lifetime',
+  outbox:    'vig.v2.outbox',
+  avatar:    'vig.v2.avatar'
 };
 
 const Store = (() => {
@@ -72,6 +74,14 @@ function impliedProb(american) {
   return american > 0
     ? 100 / (american + 100)
     : Math.abs(american) / (Math.abs(american) + 100);
+}
+
+/* Strip the book's margin from a two-way market so the pair sums to 1.
+   Used by Line Winder's probability axis. */
+function devigPair(a, b) {
+  const pa = impliedProb(a), pb = impliedProb(b);
+  const total = pa + pb;
+  return total > 0 ? [pa / total, pb / total] : [0.5, 0.5];
 }
 
 function americanFromDecimal(d) {
@@ -529,6 +539,14 @@ const activeFilter = () => (document.querySelector('.filter.active') || { datase
 const activeBetFilter = () => (document.querySelector('.bet-filter.active') || { dataset: {} }).dataset.status || 'all';
 
 function switchView(id) {
+  /* Fantasy tools and Line Winder stay open. Only the views that are
+     meaningless without identity ask for an account. */
+  if (AUTH_GATED_VIEWS.indexOf(id) !== -1 && needsAccount()) {
+    const why = id === 'bets' ? 'Sign in to keep your bets.'
+              : 'Sign in to join the leaderboard.';
+    openAuth(why);
+    return;
+  }
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active-view'));
   const t = document.getElementById(id);
   if (t) t.classList.add('active-view');
@@ -649,9 +667,22 @@ function renderSlip() {
   document.getElementById('combinedOdds').textContent = a === null ? '—' : fmtOdds(a);
   updateReturn();
   const s = weekStats(week);
+  /* Match the golf slip: say why it is blocked rather than letting the
+     user tap Place and bounce off a toast. */
+  const stakeVal = Number((document.getElementById('stakeInput') || {}).value || 0);
+  let reason = '';
+  if (selected.length < 2) reason = '';
+  else if (s.betsLeft <= 0) reason = `You have used all ${WEEKLY_BET_LIMIT} bets this week.`;
+  else if (!(stakeVal >= 1)) reason = 'Minimum virtual stake is $1.';
+  else if (stakeVal > week.bankroll) reason = `Stake exceeds your virtual bankroll of ${money(week.bankroll)}.`;
+
+  const note = document.getElementById('slipError');
+  if (note) { note.textContent = reason; note.hidden = !reason; }
+
   const btn = document.getElementById('placeMockBet');
-  btn.disabled = selected.length < 2 || s.betsLeft <= 0;
-  btn.textContent = s.betsLeft <= 0 ? 'Weekly limit reached' : 'Place mock ticket';
+  btn.disabled = selected.length < 2 || !!reason;
+  btn.textContent = s.betsLeft <= 0 ? 'Weekly limit reached'
+    : reason ? 'Check your stake' : 'Place mock ticket';
   updateNavBadges();
   renderSlipBar();
 }
@@ -664,6 +695,7 @@ function updateReturn() {
 }
 
 function placeTicket() {
+  if (!requireAccount('Sign in to place a mock bet.')) return;
   const s = weekStats(week);
   if (s.betsLeft <= 0) { showToast(`Weekly limit of ${WEEKLY_BET_LIMIT} tickets reached.`); return; }
   const stake = Number(document.getElementById('stakeInput').value || 0);
@@ -680,8 +712,20 @@ function placeTicket() {
     returnAmount: round2(stake * decimalOdds(a)),
     legs: selected.map(m => ({ title: m.title, odds: m.odds, gameId: m.gameId }))
   });
-  week.bankroll = round2(week.bankroll - stake);
+  week.bankroll = derivedBankroll(week);
   selected = [];
+  if (Cloud.enabled() && Cloud.signedIn() && cloudUnreachable()) {
+    Outbox.add(week.tickets[0], week.key);
+    showToast('Saved on this device — will sync when the server is back.');
+  } else if (Cloud.enabled() && Cloud.signedIn()) {
+    Cloud.placeBet(week.tickets[0], week.key)
+      .then(saved => { week.tickets[0] = saved; week.bankroll = derivedBankroll(week); persist(); })
+      .catch(e => {
+        console.warn('[VIG] bet queued for retry:', e && e.message);
+        Outbox.add(week.tickets[0], week.key);
+        showToast('Saved on this device — will sync when the server is back.');
+      });
+  }
   persist();
   renderMarkets(activeFilter());
   renderSlip();
@@ -1207,7 +1251,29 @@ function rivalsForWeek(key) {
   });
 }
 
+let cloudBoard = null;      // populated asynchronously from the database
+
+async function refreshLeaderboard() {
+  if (!(Cloud.enabled() && Cloud.signedIn())) { cloudBoard = null; return; }
+  const rows = await Cloud.leaderboard(week.key);
+  cloudBoard = rows.map(r => ({
+    name: r.display_name,
+    you: r.user_id === Cloud.userId(),
+    betsUsed: Number(r.bets_used) || 0,
+    profit: Number(r.profit) || 0,
+    roi: r.roi === null || r.roi === undefined ? null : Number(r.roi),
+    hitRate: Number(r.hit_rate) || 0,
+    bankroll: Number(r.bankroll) || WEEKLY_BANKROLL,
+    atRisk: Number(r.at_risk) || 0,
+    best: Number(r.biggest_win) > 0 ? { legs: 1, odds: 0, profit: Number(r.biggest_win) } : null
+  })).sort((a, b) => b.profit - a.profit);
+  renderCompetition();
+}
+
 function standings() {
+  /* Real rows the moment there is a database behind us. The generated
+     rivals remain only as a labelled demo when there is not. */
+  if (cloudBoard && cloudBoard.length) return cloudBoard;
   const s = weekStats(week);
   const ident = getIdentity();
   const me = {
@@ -1237,6 +1303,14 @@ function renderCompetition() {
   const fr = document.getElementById('friendsRanking');
   if (fr) fr.innerHTML = table;
 
+  const isDemo = !cloudBoard;
+  const demoNote = document.getElementById('leaderboardNote');
+  if (demoNote) {
+    demoNote.hidden = !isDemo;
+    demoNote.textContent = Cloud.enabled()
+      ? 'Demo standings — sign in to see the real leaderboard.'
+      : 'Demo standings. Rival figures are generated locally and are not real players.';
+  }
   const champ = rows[0];
   const champBox = document.getElementById('weekChampion');
   if (champBox) {
@@ -2121,8 +2195,22 @@ function renderTicker() {
 function renderIdentityGate() {
   const gate = document.getElementById('identityGate');
   if (!gate) return;
+  /* Checking configured() rather than enabled() matters: boot calls this
+     synchronously while Cloud.init() is still loading the SDK. Without it
+     the local name prompt flashes up and then never closes once cloud
+     mode takes over — which would make an optional signup feel forced. */
+  if (Cloud.configured()) {
+    renderAccountChip();
+    if (needsProfile()) { openAuth('One more step.'); return; }
+    renderAuthGate();
+    if (!Cloud.signedIn()) gate.classList.remove('open');   // signup is optional
+    else gate.classList.remove('open');
+    return;
+  }
   if (getIdentity()) { gate.classList.remove('open'); return; }
   gate.classList.add('open');
+  renderAuthGate();
+  return;
   const input = document.getElementById('identityName');
   const code = document.getElementById('identityCode');
   const save = document.getElementById('identitySave');
@@ -2189,7 +2277,9 @@ function wireUp() {
     b.classList.add('active');
     renderBets(b.dataset.status);
   });
-  document.getElementById('stakeInput').oninput = () => { updateReturn(); renderSlipBar(); };
+  /* Must re-run the slip validation too, or typing a stake bigger than the
+     bankroll updates the payout while leaving Place enabled. */
+  document.getElementById('stakeInput').oninput = () => { updateReturn(); renderSlip(); };
   document.getElementById('clearSlip').onclick = () => {
     selected = []; renderMarkets(activeFilter()); renderSlip();
   };
@@ -2237,6 +2327,8 @@ function wireUp() {
   const profileToggle = document.getElementById('profileToggle'), profileMenu = document.getElementById('profileMenu');
   profileToggle.addEventListener('click', e => {
     e.stopPropagation();
+    /* rebuild on open so bankroll, ROI and avatar are current */
+    safely('profile card', renderProfileCard);
     profileToggle.setAttribute('aria-expanded', String(profileMenu.classList.toggle('open')));
   });
   document.addEventListener('click', e => {
@@ -2395,7 +2487,17 @@ function boot() {
   safely('board', loadBoard);
   safely('compare', initCompare);
   safely('nav badges', updateNavBadges);
+  safely('cloud', () => {
+    Cloud.init().then(ok => {
+      renderAccountChip();
+      renderIdentityGate();
+      renderAdmin();
+      if (ok && Cloud.signedIn()) { syncFromCloud(); refreshLeaderboard(); }
+    });
+  });
   safely('identity', renderIdentityGate);
+  safely('outbox', () => { renderSyncChip(); startOutboxRetry(); });
+  safely('header avatar', renderHeaderAvatar);
   safely('golf event', async () => {
     await GolfEvent.load();
     renderGolfEvent();
@@ -2984,6 +3086,7 @@ function confirmGolfBet(sel, stake, profit, total) {
 }
 
 function placeGolfBet(sel, stake, total) {
+  if (!requireAccount('Sign in to place a mock bet.')) return;
   const s = weekStats(week);
   if (GolfEvent.isLocked()) { showToast('Betting is closed for this event.'); return; }
   if (s.betsLeft <= 0) { showToast(`Weekly limit of ${WEEKLY_BET_LIMIT} bets reached.`); return; }
@@ -3004,8 +3107,24 @@ function placeGolfBet(sel, stake, total) {
     returnAmount: round2(total),
     legs: [{ title: `${sel.name} — ${GolfEvent.market().name}`, odds: sel.americanOdds, gameId: null }]
   });
-  week.bankroll = round2(week.bankroll - stake);
+  week.bankroll = derivedBankroll(week);
   GolfEvent.selection = null;
+  if (Cloud.enabled() && Cloud.signedIn() && cloudUnreachable()) {
+    Outbox.add(week.tickets[0], week.key);
+    showToast('Saved on this device — will sync when the server is back.');
+  } else if (Cloud.enabled() && Cloud.signedIn()) {
+    Cloud.placeBet(week.tickets[0], week.key)
+      .then(saved => {
+        week.tickets[0] = saved;          // adopt the row id from the database
+        week.bankroll = derivedBankroll(week);
+        persist();
+      })
+      .catch(e => {
+        console.warn('[VIG] bet queued for retry:', e && e.message);
+        Outbox.add(week.tickets[0], week.key);
+        showToast('Saved on this device — will sync when the server is back.');
+      });
+  }
   persist();
   renderGolfEvent();
   updateDashboard();
@@ -3027,11 +3146,9 @@ function settleGolfEvent(winnerId, { push = false } = {}) {
     if (push) {
       t.status = 'push';
       t.returnAmount = t.stake;                 // stake back, no profit
-      week.bankroll = round2(week.bankroll + t.stake);
       paid += t.stake;
     } else if (t.selectionId === winnerId) {
       t.status = 'won';                          // stake + profit returned
-      week.bankroll = round2(week.bankroll + t.returnAmount);
       paid += t.returnAmount;
     } else {
       t.status = 'lost';                         // stake already deducted
@@ -3039,6 +3156,7 @@ function settleGolfEvent(winnerId, { push = false } = {}) {
     }
     t.settledAt = new Date().toISOString();
   });
+  week.bankroll = derivedBankroll(week);
   week.history.push(round2(week.bankroll));
   if (week.history.length > 40) week.history.shift();
   GolfEvent.setState({ status: 'final', winner: push ? null : winnerId, settledAt: new Date().toISOString() });
@@ -3118,6 +3236,16 @@ function renderAdmin() {
           ${lt.profit >= 0 ? '+' : ''}${money(lt.profit)} · ${lt.weeks} week${lt.weeks === 1 ? '' : 's'} archived</p>` : ''}
       </div>
 
+      <div class="admin-block">
+        <h3>Users</h3>
+        <p class="admin-note" id="adminUserCount">${Cloud.enabled()
+          ? (Cloud.signedIn() ? 'Counting…' : 'Sign in to read the signup count.')
+          : 'Local mode — no accounts configured.'}</p>
+        <p class="admin-note">${Cloud.enabled()
+          ? `Signed in as ${Cloud.email() || 'unknown'}${Cloud.admin ? ' · admin' : ''}`
+          : 'Add Supabase keys in config.js to enable accounts.'}</p>
+      </div>
+
       <div class="admin-block danger">
         <h3>Reset test data</h3>
         <p class="admin-note">Clears this week's bets and the event result. Lifetime stats are kept.</p>
@@ -3130,6 +3258,15 @@ function renderAdmin() {
 
   const rerender = () => { renderGolfEvent(); updateDashboard(); renderBets(activeBetFilter());
                            renderCompetition(); renderAdmin(); };
+
+  if (Cloud.enabled() && Cloud.signedIn()) {
+    Cloud.userCount().then(n => {
+      const el = document.getElementById('adminUserCount');
+      if (el) el.textContent = (n === null)
+        ? 'Could not read the signup count.'
+        : `${n} signed-up user${n === 1 ? '' : 's'}.`;
+    });
+  }
 
   box.querySelectorAll('[data-admin-status]').forEach(b => b.onclick = () => {
     GolfEvent.setState({ status: b.dataset.adminStatus });
@@ -3144,7 +3281,13 @@ function renderAdmin() {
     if (!confirm(`Settle all open golf bets with ${name} as the winner?\n\nThis pays winners and marks the rest lost.`)) return;
     const r = settleGolfEvent(w);
     rerender();
-    showToast(`Settled ${r.settled} bet${r.settled === 1 ? '' : 's'}, ${money(r.paid)} returned.`);
+    if (Cloud.enabled() && Cloud.admin) {
+      Cloud.settleEvent(GolfEvent.data.eventId, w)
+        .then(res => { showToast(`Settled ${res.settled} bet${res.settled === 1 ? '' : 's'} for everyone.`); refreshLeaderboard(); })
+        .catch(e => showToast(`Settled locally. Server: ${e && e.message ? e.message : 'failed'}`));
+    } else {
+      showToast(`Settled ${r.settled} bet${r.settled === 1 ? '' : 's'}, ${money(r.paid)} returned.`);
+    }
   };
 
   document.getElementById('adminPush').onclick = () => {
@@ -3205,11 +3348,861 @@ function renderAdmin() {
   };
 }
 
+
+
+/* ============================================================
+   17. Cloud — Supabase accounts, bets and leaderboard (v1.5)
+
+   Degrades to nothing. If SUPABASE_URL is blank, Cloud.enabled() is
+   false, no gates appear, and the app behaves exactly as it did in
+   v1.4.4 with local storage only.
+
+   Bankroll is never stored anywhere — not locally, not in the
+   database. It is derived from the bets themselves, so there is no
+   balance field for anyone to edit.
+   ============================================================ */
+const SDK_URL = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
+
+const Cloud = {
+  client: null,
+  session: null,
+  profile: null,
+  admin: false,
+  status: 'off',          // off | loading | ready | error
+  error: null,
+
+  config() {
+    const c = window.VIG_CONFIG || {};
+    return { url: (c.SUPABASE_URL || '').trim(), key: (c.SUPABASE_ANON_KEY || '').trim() };
+  },
+  configured() { const c = this.config(); return !!(c.url && c.key); },
+  enabled() { return this.status === 'ready'; },
+  signedIn() { return !!(this.session && this.session.user); },
+  userId() { return this.signedIn() ? this.session.user.id : null; },
+  /* The email is never copied into our own tables. This reads it back
+     from the auth session purely to show "signed in as" in the UI. */
+  email() { return this.signedIn() ? this.session.user.email : null; },
+
+  loadSdk() {
+    if (window.supabase && window.supabase.createClient) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const el = document.createElement('script');
+      el.src = SDK_URL;
+      el.async = true;
+      el.onload = () => resolve();
+      el.onerror = () => reject(new Error('Supabase SDK failed to load'));
+      document.head.appendChild(el);
+    });
+  },
+
+  async init() {
+    if (!this.configured()) { this.status = 'off'; return false; }
+    this.status = 'loading';
+    try {
+      await this.loadSdk();
+      const { url, key } = this.config();
+      this.client = window.supabase.createClient(url, key, {
+        auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
+      });
+      const { data } = await this.client.auth.getSession();
+      this.session = data ? data.session : null;
+      this.client.auth.onAuthStateChange((_evt, sess) => {
+        this.session = sess;
+        onAuthChanged();
+      });
+      if (this.signedIn()) await this.afterSignIn();
+      this.status = 'ready';
+      return true;
+    } catch (e) {
+      this.status = 'error';
+      this.error = e && e.message ? e.message : String(e);
+      console.warn('[VIG] cloud unavailable, staying local:', this.error);
+      return false;
+    }
+  },
+
+  async afterSignIn() {
+    await this.loadProfile();
+    await this.loadAdmin();
+  },
+
+  async signUpPassword(email, password) {
+    if (!this.client) throw new Error('Cloud not ready');
+    const { data, error } = await this.client.auth.signUp({
+      email: String(email || '').trim(),
+      password: String(password || ''),
+      options: { emailRedirectTo: location.origin + location.pathname }
+    });
+    if (error) throw error;
+    return data;
+  },
+
+  async signInPassword(email, password) {
+    if (!this.client) throw new Error('Cloud not ready');
+    const { data, error } = await this.client.auth.signInWithPassword({
+      email: String(email || '').trim(),
+      password: String(password || '')
+    });
+    if (error) throw error;
+    return data;
+  },
+
+  async resetPassword(email) {
+    if (!this.client) throw new Error('Cloud not ready');
+    const { error } = await this.client.auth.resetPasswordForEmail(
+      String(email || '').trim(), { redirectTo: location.origin + location.pathname });
+    if (error) throw error;
+    return true;
+  },
+
+  async signIn(email) {
+    if (!this.client) throw new Error('Cloud not ready');
+    const redirectTo = location.origin + location.pathname;
+    const { error } = await this.client.auth.signInWithOtp({
+      email: String(email || '').trim(),
+      options: { emailRedirectTo: redirectTo }
+    });
+    if (error) throw error;
+    return true;
+  },
+
+  async signOut() {
+    if (!this.client) return;
+    await this.client.auth.signOut();
+    this.session = null; this.profile = null; this.admin = false;
+  },
+
+  /* `profileUnknown` is the difference between "this user has no profile
+     row yet" and "we could not reach the database". Conflating them meant a
+     returning user hit a paused free-tier project and was asked to pick a
+     display name they already had — with no way to dismiss it. */
+  profileUnknown: false,
+  reachable: true,
+
+  async loadProfile() {
+    if (!this.signedIn()) { this.profile = null; this.profileUnknown = false; return null; }
+    try {
+      const { data, error } = await this.client
+        .from('profiles').select('*').eq('id', this.userId()).maybeSingle();
+      if (error) throw error;
+      this.profile = data || null;
+      this.profileUnknown = false;
+      this.reachable = true;
+      return this.profile;
+    } catch (e) {
+      console.warn('[VIG] profile read failed:', e && e.message);
+      this.profile = null;
+      this.profileUnknown = true;      // unknown, not absent
+      this.reachable = false;
+      return null;
+    }
+  },
+
+  async saveProfile(displayName, leagueCode, extra) {
+    if (!this.signedIn()) throw new Error('Not signed in');
+    const name = String(displayName || '').trim().replace(/\s+/g, ' ').slice(0, 24);
+    if (!name) throw new Error('Display name required');
+    const row = {
+      id: this.userId(), display_name: name,
+      league_code: String(leagueCode || '').trim().slice(0, 8).toUpperCase() || null
+    };
+    if (extra && typeof extra === 'object') {
+      if (extra.avatar_color) row.avatar_color = extra.avatar_color;
+      if (extra.avatar_emoji !== undefined) row.avatar_emoji = extra.avatar_emoji || null;
+    }
+    const { data, error } = await this.client
+      .from('profiles').upsert(row).select().single();
+    if (error) throw error;
+    this.profile = data;
+    return data;
+  },
+
+  async loadAdmin() {
+    if (!this.signedIn()) { this.admin = false; return false; }
+    const { data } = await this.client
+      .from('admins').select('user_id').eq('user_id', this.userId()).maybeSingle();
+    this.admin = !!data;
+    return this.admin;
+  },
+
+  /* ---- bets ---- */
+  async myBets(weekKey) {
+    if (!this.signedIn()) return [];
+    const { data, error } = await this.client
+      .from('bets').select('*')
+      .eq('user_id', this.userId()).eq('week_key', weekKey)
+      .order('placed_at', { ascending: false });
+    if (error) { console.warn('[VIG] bets read failed:', error.message); return []; }
+    return (data || []).map(rowToTicket);
+  },
+
+  async placeBet(ticket, weekKey) {
+    if (!this.signedIn()) throw new Error('Not signed in');
+    const row = {
+      user_id: this.userId(),
+      week_key: weekKey,
+      kind: ticket.kind === 'golf' ? 'golf' : 'parlay',
+      event_id: ticket.eventId || null,
+      market_id: ticket.marketId || null,
+      selection_id: ticket.selectionId || null,
+      title: ticket.legs && ticket.legs.length
+        ? (ticket.legs.length === 1 ? ticket.legs[0].title : `${ticket.legs.length}-leg parlay`)
+        : 'Mock bet',
+      stake: ticket.stake,
+      odds: ticket.odds,
+      potential_return: ticket.returnAmount,
+      legs: ticket.legs || null
+    };
+    const { data, error } = await this.client.from('bets').insert(row).select().single();
+    if (error) throw error;
+    return rowToTicket(data);
+  },
+
+  /* Admin only — RLS rejects this for everyone else, which is the
+     whole point. Ordinary users have no UPDATE policy on bets. */
+  async settleEvent(eventId, winnerSelectionId, { push = false } = {}) {
+    if (!this.admin) throw new Error('Admin only');
+    const { data: open, error: readErr } = await this.client
+      .from('bets').select('*').eq('event_id', eventId).eq('status', 'open');
+    if (readErr) throw readErr;
+    if (!open || !open.length) return { settled: 0 };
+    const now = new Date().toISOString();
+    let settled = 0;
+    for (const b of open) {
+      const status = push ? 'push' : (b.selection_id === winnerSelectionId ? 'won' : 'lost');
+      const { error } = await this.client.from('bets')
+        .update({ status, settled_at: now }).eq('id', b.id).eq('status', 'open');
+      if (!error) settled++;
+    }
+    await this.client.from('events').update({
+      status: 'final', winner_selection_id: push ? null : winnerSelectionId, updated_at: now
+    }).eq('event_id', eventId);
+    return { settled };
+  },
+
+  /* ---- shared reads ---- */
+  async leaderboard(weekKey) {
+    if (!this.signedIn()) return [];
+    const { data, error } = await this.client
+      .rpc('leaderboard', { p_week: weekKey, p_start: WEEKLY_BANKROLL });
+    if (error) { console.warn('[VIG] leaderboard failed:', error.message); return []; }
+    return data || [];
+  },
+  async lifetime() {
+    if (!this.signedIn()) return [];
+    const { data, error } = await this.client.rpc('lifetime', { p_start: WEEKLY_BANKROLL });
+    if (error) return [];
+    return data || [];
+  },
+  async userCount() {
+    if (!this.signedIn()) return null;
+    const { data, error } = await this.client.rpc('user_count');
+    return error ? null : data;
+  },
+
+  /* ---- events ---- */
+  async getEvent(eventId) {
+    if (!this.enabled() || !this.signedIn()) return null;
+    const { data } = await this.client
+      .from('events').select('*').eq('event_id', eventId).maybeSingle();
+    return data || null;
+  },
+  async upsertEvent(row) {
+    if (!this.admin) throw new Error('Admin only');
+    const { data, error } = await this.client
+      .from('events').upsert(Object.assign({ updated_at: new Date().toISOString() }, row))
+      .select().single();
+    if (error) throw error;
+    return data;
+  }
+};
+
+/* ---- outbox --------------------------------------------------------
+   A bet that cannot reach the database is queued here instead of being
+   silently lost. Two things were wrong before: nothing retried, and
+   syncFromCloud() replaced the local list wholesale — so an offline bet
+   vanished the next time the server answered. The queue is flushed
+   BEFORE pulling the remote list, and anything still pending is merged
+   on top of it.
+-------------------------------------------------------------------- */
+const Outbox = {
+  all() { return Store.get(KEYS.outbox, []) || []; },
+  count() { return this.all().length; },
+  add(ticket, weekKey) {
+    const q = this.all();
+    if (q.some(x => x.ticket.id === ticket.id)) return;
+    q.push({ ticket, weekKey, queuedAt: new Date().toISOString(), tries: 0 });
+    Store.set(KEYS.outbox, q);
+    renderSyncChip();
+  },
+  remove(localId) {
+    Store.set(KEYS.outbox, this.all().filter(x => x.ticket.id !== localId));
+    renderSyncChip();
+  },
+  bump(localId) {
+    const q = this.all();
+    const hit = q.find(x => x.ticket.id === localId);
+    if (hit) { hit.tries += 1; Store.set(KEYS.outbox, q); }
+  },
+  clear() { Store.set(KEYS.outbox, []); renderSyncChip(); }
+};
+
+let flushing = false;
+
+/* Returns how many made it. Safe to call repeatedly — each success
+   removes its entry, so a retry never double-inserts. */
+async function flushOutbox() {
+  if (flushing) return 0;
+  if (!(Cloud.enabled() && Cloud.signedIn())) return 0;
+  const queue = Outbox.all();
+  if (!queue.length) return 0;
+  flushing = true;
+  let sent = 0;
+  try {
+    for (const entry of queue) {
+      try {
+        const saved = await Cloud.placeBet(entry.ticket, entry.weekKey);
+        /* swap the local placeholder for the row the database returned */
+        const i = week.tickets.findIndex(t => t.id === entry.ticket.id);
+        if (i >= 0) week.tickets[i] = saved;
+        Outbox.remove(entry.ticket.id);
+        sent++;
+      } catch (e) {
+        Outbox.bump(entry.ticket.id);
+        Cloud.reachable = false;
+        break;                        // server is down; stop hammering it
+      }
+    }
+  } finally { flushing = false; }
+  if (sent) { week.bankroll = derivedBankroll(week); persist(); }
+  return sent;
+}
+
+function renderSyncChip() {
+  const el = document.getElementById('syncChip');
+  if (!el) return;
+  const n = Outbox.count();
+  if (!n || !Cloud.enabled()) { el.hidden = true; return; }
+  el.hidden = false;
+  el.textContent = `${n} bet${n === 1 ? '' : 's'} waiting to sync`;
+  el.onclick = async () => {
+    el.textContent = 'Syncing…';
+    const sent = await flushOutbox();
+    renderSyncChip();
+    showToast(sent ? `${sent} bet${sent === 1 ? '' : 's'} synced.` : 'Still cannot reach the server.');
+    if (sent) { renderBets(activeBetFilter()); refreshLeaderboard(); }
+  };
+}
+
+function rowToTicket(r) {
+  return {
+    id: r.id,
+    kind: r.kind,
+    eventId: r.event_id,
+    marketId: r.market_id,
+    selectionId: r.selection_id,
+    date: new Date(r.placed_at).toLocaleString(undefined,
+      { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }),
+    placedAt: r.placed_at,
+    status: r.status,
+    stake: Number(r.stake),
+    odds: Number(r.odds),
+    returnAmount: Number(r.potential_return),
+    settledAt: r.settled_at || undefined,
+    legs: r.legs || [{ title: r.title, odds: Number(r.odds), gameId: null }],
+    remote: true
+  };
+}
+
+/* Bankroll is a function of the bets, never a stored number. Works
+   identically local or remote, and cannot drift out of step with the
+   ticket list. */
+function derivedBankroll(w) {
+  const t = (w && w.tickets) || [];
+  const staked = t.reduce((a, x) => a + x.stake, 0);
+  const returned = t.reduce((a, x) =>
+    a + (x.status === 'won' ? x.returnAmount
+       : (x.status === 'push' || x.status === 'void') ? x.stake : 0), 0);
+  return round2(WEEKLY_BANKROLL - staked + returned);
+}
+
+
+
+/* ============================================================
+   18. Auth UI and gating (v1.5)
+   Signup is optional. Fantasy tools and Line Winder stay open to
+   everyone. An account is required only where identity is genuinely
+   needed: placing a bet, My Bets, and the leaderboard.
+   ============================================================ */
+const AUTH_GATED_VIEWS = ['bets', 'friends', 'leaderboard'];
+let authPending = false;
+
+function needsAccount() { return Cloud.enabled() && !Cloud.signedIn(); }
+function needsProfile() {
+  return Cloud.enabled() && Cloud.signedIn() && !Cloud.profile && !Cloud.profileUnknown;
+}
+/* Signed in, but the database did not answer. Almost always a paused
+   free-tier project. */
+function cloudUnreachable() { return Cloud.enabled() && Cloud.signedIn() && Cloud.profileUnknown; }
+
+/* Returns true if the action may proceed. Otherwise opens the sign-in
+   sheet with a reason, so the ask never feels arbitrary. */
+function requireAccount(reason) {
+  if (!needsAccount()) return true;
+  openAuth(reason || 'This needs an account.');
+  return false;
+}
+
+function openAuth(reason) {
+  const gate = document.getElementById('identityGate');
+  if (!gate) return;
+  gate.classList.add('open');
+  wireAuthClose();
+  const why = document.getElementById('authReason');
+  if (why) { why.textContent = reason || ''; why.hidden = !reason; }
+  renderAuthGate();
+  setTimeout(() => {
+    const el = document.getElementById(needsProfile() ? 'identityName' : 'authEmailInput');
+    if (el && el.focus) el.focus();
+  }, 60);
+}
+function closeAuth2() {
+  const gate = document.getElementById('identityGate');
+  if (gate) gate.classList.remove('open');
+}
+
+function renderAuthGate() {
+  const body = document.getElementById('authBody');
+  if (!body) return;
+
+  /* Cloud switched off entirely — keep the original local name prompt. */
+  if (!Cloud.enabled()) {
+    body.innerHTML = `
+      <h2>Pick a display name</h2>
+      <p>This is how you appear on the private leaderboard. Virtual funds only — no real money, deposits or prizes.</p>
+      <label>Display name<input id="identityName" type="text" maxlength="24" placeholder="e.g. Antonio" autocomplete="nickname"></label>
+      <label>League code <small>(optional)</small><input id="identityCode" type="text" maxlength="8" placeholder="VIG01"></label>
+      <p class="identity-error" id="identityError"></p>
+      <button class="full primary" id="identitySave">Start with $1,000 virtual</button>`;
+    wireLocalIdentity();
+    return;
+  }
+
+  /* Signed in but no profile row yet — ask for a name. */
+  if (needsProfile()) {
+    body.innerHTML = `
+      <h2>Pick a display name</h2>
+      <p>Signed in as <strong>${Cloud.email() || 'your account'}</strong>. This name is how you appear on the leaderboard.</p>
+      <label>Display name<input id="identityName" type="text" maxlength="24" placeholder="e.g. Antonio" autocomplete="nickname"></label>
+      <label>League code <small>(optional)</small><input id="identityCode" type="text" maxlength="8" placeholder="VIG01"></label>
+      <p class="identity-error" id="identityError"></p>
+      <button class="full primary" id="identitySave">Start with $1,000 virtual</button>
+      <button class="auth-switch" id="authSignOut">Sign out</button>`;
+    wireCloudProfile();
+    return;
+  }
+
+  /* Signed in but the server did not answer — say so plainly rather than
+     asking a returning user to set up an account they already have. */
+  if (cloudUnreachable()) {
+    body.innerHTML = `
+      <h2>Can't reach the server</h2>
+      <p>You are signed in, but the database did not respond. On the free plan a
+         project pauses after a week without activity and needs a manual resume,
+         which takes about 30 seconds.</p>
+      <p class="auth-privacy">Your bets are safe. Everything on this device still
+         works — new bets save locally and will not sync until the server is back.</p>
+      <button class="full primary" id="authRetry">Try again</button>
+      <button class="auth-switch" id="authDismiss">Keep playing offline</button>`;
+    const retry = document.getElementById('authRetry');
+    if (retry) retry.onclick = async () => {
+      retry.disabled = true; retry.textContent = 'Checking…';
+      await Cloud.loadProfile();
+      if (Cloud.reachable) { closeAuth2(); renderAccountChip(); syncFromCloud(); refreshLeaderboard(); }
+      else { retry.disabled = false; retry.textContent = 'Try again'; showToast('Still no response.'); }
+    };
+    const d = document.getElementById('authDismiss');
+    if (d) d.onclick = closeAuth2;
+    return;
+  }
+
+  /* Signed in with a profile — nothing to ask. */
+  if (Cloud.signedIn()) { closeAuth2(); return; }
+
+  /* Signed out. Password by default so the same account opens on any
+     device; magic link kept as a no-password alternative. */
+  const mode = authMode2;
+  body.innerHTML = `
+    <h2>${mode === 'signup' ? 'Create your account' : 'Sign in'}</h2>
+    <p>Fantasy tools and Line Winder are free without an account.
+       Sign in to place mock bets, keep them across devices, and join the leaderboard.</p>
+    <div class="auth-tabs">
+      <button class="auth-tab ${mode === 'signin' ? 'active' : ''}" data-auth-mode2="signin">Sign in</button>
+      <button class="auth-tab ${mode === 'signup' ? 'active' : ''}" data-auth-mode2="signup">Create account</button>
+    </div>
+    <label>Email address<input id="authEmailInput" type="email" placeholder="you@example.com"
+      autocomplete="email" inputmode="email"></label>
+    <label>Password<input id="authPasswordInput" type="password"
+      placeholder="${mode === 'signup' ? 'At least 8 characters' : 'Your password'}"
+      autocomplete="${mode === 'signup' ? 'new-password' : 'current-password'}"></label>
+    <p class="auth-privacy">We use your email to sign you in and save your bets.
+      Nothing else. No marketing, never shared.</p>
+    <p class="identity-error" id="identityError"></p>
+    <button class="full primary" id="authSubmit2">${mode === 'signup' ? 'Create account' : 'Sign in'}</button>
+    <button class="auth-switch" id="authMagic">Email me a sign-in link instead</button>
+    ${mode === 'signin' ? '<button class="auth-switch subtle" id="authForgot">Forgot password</button>' : ''}
+    <button class="auth-switch subtle" id="authDismiss">Keep looking around</button>`;
+  wirePasswordAuth();
+}
+
+let authMode2 = 'signin';
+
+function wirePasswordAuth() {
+  const email = document.getElementById('authEmailInput');
+  const pass = document.getElementById('authPasswordInput');
+  const err = document.getElementById('identityError');
+  const btn = document.getElementById('authSubmit2');
+
+  document.querySelectorAll('[data-auth-mode2]').forEach(b => b.onclick = () => {
+    authMode2 = b.dataset.authMode2;
+    renderAuthGate();
+  });
+
+  const submit = async () => {
+    const e = (email.value || '').trim();
+    const p = pass.value || '';
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) { err.textContent = 'Enter a valid email address.'; email.focus(); return; }
+    if (authMode2 === 'signup' && p.length < 8) { err.textContent = 'Password must be at least 8 characters.'; pass.focus(); return; }
+    if (!p) { err.textContent = 'Enter your password.'; pass.focus(); return; }
+    err.textContent = '';
+    btn.disabled = true; btn.textContent = authMode2 === 'signup' ? 'Creating…' : 'Signing in…';
+    try {
+      if (authMode2 === 'signup') {
+        const res = await Cloud.signUpPassword(e, p);
+        if (res && res.session) { onAuthChanged(); }
+        else {
+          document.getElementById('authBody').innerHTML = `
+            <h2>Confirm your email</h2>
+            <p>We sent a confirmation link to <strong>${e}</strong>. Open it and you are in.</p>
+            <button class="auth-switch" id="authDismiss">Close</button>`;
+          const d = document.getElementById('authDismiss'); if (d) d.onclick = closeAuth2;
+        }
+      } else {
+        await Cloud.signInPassword(e, p);
+        onAuthChanged();
+      }
+    } catch (ex) {
+      const msg = ex && ex.message ? ex.message : 'Could not sign in.';
+      err.textContent = /invalid login/i.test(msg)
+        ? 'That email and password do not match.' : msg;
+      btn.disabled = false; btn.textContent = authMode2 === 'signup' ? 'Create account' : 'Sign in';
+    }
+  };
+  btn.onclick = submit;
+  pass.onkeydown = ev => { if (ev.key === 'Enter') submit(); };
+  email.onkeydown = ev => { if (ev.key === 'Enter') pass.focus(); };
+
+  const magic = document.getElementById('authMagic');
+  if (magic) magic.onclick = () => {
+    document.getElementById('authBody').innerHTML = `
+      <h2>Sign in without a password</h2>
+      <p>We will email you a link. Open it on this device and you are straight in.</p>
+      <label>Email address<input id="authEmailInput" type="email" placeholder="you@example.com"
+        autocomplete="email" inputmode="email" value="${(email.value || '').trim()}"></label>
+      <p class="auth-privacy">We use your email to sign you in and save your bets.
+        Nothing else. No marketing, never shared.</p>
+      <p class="identity-error" id="identityError"></p>
+      <button class="full primary" id="authSend">Email me a sign-in link</button>
+      <button class="auth-switch subtle" id="authBackToPassword">Use a password instead</button>`;
+    wireMagicLink();
+    const back = document.getElementById('authBackToPassword');
+    if (back) back.onclick = renderAuthGate;
+  };
+
+  const forgot = document.getElementById('authForgot');
+  if (forgot) forgot.onclick = async () => {
+    const e = (email.value || '').trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) { err.textContent = 'Enter your email first, then tap this.'; email.focus(); return; }
+    try { await Cloud.resetPassword(e); showToast('Password reset link sent.'); }
+    catch (ex) { err.textContent = ex && ex.message ? ex.message : 'Could not send the reset link.'; }
+  };
+
+  const dismiss = document.getElementById('authDismiss');
+  if (dismiss) dismiss.onclick = closeAuth2;
+}
+
+function wireLocalIdentity() {
+  const input = document.getElementById('identityName');
+  const code = document.getElementById('identityCode');
+  const err = document.getElementById('identityError');
+  const submit = () => {
+    const id = saveIdentity(input.value, code.value);
+    if (!id) { err.textContent = 'Please enter a display name.'; input.focus(); return; }
+    closeAuth2(); renderCompetition(); showToast(`Welcome, ${id.name}.`);
+  };
+  document.getElementById('identitySave').onclick = submit;
+  input.onkeydown = e => { if (e.key === 'Enter') submit(); };
+}
+
+function wireCloudProfile() {
+  const input = document.getElementById('identityName');
+  const code = document.getElementById('identityCode');
+  const err = document.getElementById('identityError');
+  const btn = document.getElementById('identitySave');
+  const submit = async () => {
+    err.textContent = '';
+    btn.disabled = true; btn.textContent = 'Saving…';
+    try {
+      const prof = await Cloud.saveProfile(input.value, code.value);
+      saveIdentity(prof.display_name, prof.league_code || '');
+      closeAuth2();
+      renderAccountChip();
+      await syncFromCloud();
+      await refreshLeaderboard();
+      showToast(`Welcome, ${prof.display_name}.`);
+    } catch (e) {
+      err.textContent = e && e.message ? e.message : 'Could not save that name.';
+      btn.disabled = false; btn.textContent = 'Start with $1,000 virtual';
+    }
+  };
+  btn.onclick = submit;
+  input.onkeydown = e => { if (e.key === 'Enter') submit(); };
+  const out = document.getElementById('authSignOut');
+  if (out) out.onclick = async () => { await Cloud.signOut(); onAuthChanged(); };
+}
+
+function wireMagicLink() {
+  const input = document.getElementById('authEmailInput');
+  const err = document.getElementById('identityError');
+  const btn = document.getElementById('authSend');
+  const send = async () => {
+    const email = (input.value || '').trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      err.textContent = 'Enter a valid email address.'; input.focus(); return;
+    }
+    err.textContent = '';
+    btn.disabled = true; btn.textContent = 'Sending…';
+    try {
+      await Cloud.signIn(email);
+      authPending = true;
+      document.getElementById('authBody').innerHTML = `
+        <h2>Check your email</h2>
+        <p>A sign-in link is on its way to <strong>${email}</strong>.
+           Open it on this device and you will be signed straight in.</p>
+        <p class="auth-privacy">The link expires in an hour. No password to remember.</p>
+        <button class="auth-switch" id="authDismiss">Close</button>`;
+      const d = document.getElementById('authDismiss');
+      if (d) d.onclick = closeAuth2;
+    } catch (e) {
+      err.textContent = e && e.message ? e.message : 'Could not send the link.';
+      btn.disabled = false; btn.textContent = 'Email me a sign-in link';
+    }
+  };
+  btn.onclick = send;
+  input.onkeydown = e => { if (e.key === 'Enter') send(); };
+  const dismiss = document.getElementById('authDismiss');
+  if (dismiss) dismiss.onclick = closeAuth2;
+}
+
+/* Pull the signed-in user's week from the database so bets follow them
+   across devices. */
+async function syncFromCloud() {
+  if (!Cloud.enabled() || !Cloud.signedIn()) return;
+  try {
+    if (cloudUnreachable()) return;      // keep whatever is on the device
+    /* Flush first. Pulling the remote list before sending queued bets is
+       what used to make an offline bet disappear. */
+    await flushOutbox();
+    const remote = await Cloud.myBets(week.key);
+    const pending = Outbox.all().map(x => x.ticket);
+    const remoteIds = new Set(remote.map(t => t.id));
+    week.tickets = remote.concat(pending.filter(t => !remoteIds.has(t.id)));
+    week.bankroll = derivedBankroll(week);
+    persist();
+    updateDashboard();
+    renderBets(activeBetFilter());
+    await renderCompetition();
+    renderGolfEvent();
+  } catch (e) {
+    console.warn('[VIG] cloud sync failed:', e && e.message);
+  }
+}
+
+function startOutboxRetry() {
+  if (typeof window === 'undefined') return;
+  window.addEventListener('online', () => {
+    Cloud.reachable = true;
+    flushOutbox().then(n => { if (n) { renderBets(activeBetFilter()); refreshLeaderboard();
+                                       showToast(`${n} queued bet${n === 1 ? '' : 's'} synced.`); } });
+  });
+  setInterval(() => {
+    if (Outbox.count()) flushOutbox().then(n => { if (n) { renderBets(activeBetFilter()); refreshLeaderboard(); } });
+  }, 120000);
+}
+
+function onAuthChanged() {
+  safely('auth change', () => {
+    if (Cloud.signedIn()) {
+      Cloud.afterSignIn().then(async () => {
+        await flushOutbox();
+        if (needsProfile()) openAuth('One more step.');
+        else { closeAuth2(); syncFromCloud(); }
+        renderAccountChip();
+        renderAdmin();
+      });
+    } else {
+      renderAccountChip();
+      renderAuthGate();
+    }
+  });
+}
+
+function wireAuthClose() {
+  const btn = document.getElementById('authCloseBtn');
+  if (btn) btn.onclick = () => {
+    /* Cannot dismiss the profile step — a signed-in user without a name
+       would be invisible on the leaderboard. */
+    if (needsProfile()) { showToast('Please choose a display name.'); return; }
+    closeAuth2();
+  };
+}
+
+const AVATAR_COLORS = ['#2875CB','#4ad991','#e8bd69','#9a7cff','#ff7d8e','#55b9c9','#c9c8c8','#eb6834'];
+const AVATAR_EMOJI = ['', '🏈', '⛳️', '🏀', '⚾️', '🎯', '🔥', '🧊', '👑', '🦈', '🐐', '💸'];
+
+function avatarOf(profile, identity) {
+  const p = profile || {};
+  const name = p.display_name || (identity && identity.name) || 'You';
+  const local = Store.get(KEYS.avatar, {}) || {};
+  return {
+    name,
+    initials: name.trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase() || 'V',
+    color: p.avatar_color || local.color || '#2875CB',
+    emoji: (p.avatar_emoji !== undefined && p.avatar_emoji !== null) ? p.avatar_emoji : (local.emoji || '')
+  };
+}
+
+function avatarHtml(a, cls) {
+  return `<span class="avatar ${cls || ''}" style="background:${a.color}">${
+    a.emoji ? `<em>${a.emoji}</em>` : a.initials}</span>`;
+}
+
+function renderProfileCard() {
+  const box = document.getElementById('profileMenu');
+  if (!box) return;
+  const ident = getIdentity();
+  const a = avatarOf(Cloud.profile, ident);
+  const s = weekStats(week);
+  const lt = Store.get(KEYS.lifetime, null);
+  const signedIn = Cloud.enabled() && Cloud.signedIn();
+
+  box.innerHTML = `<div class="sheet-grip" aria-hidden="true"></div>
+    <div class="profile-card">
+      <button class="avatar-btn" id="avatarEdit" aria-label="Change avatar">
+        ${avatarHtml(a, 'lg')}<span class="avatar-pencil">✎</span>
+      </button>
+      <div class="profile-who">
+        <strong>${a.name}</strong>
+        <small>${signedIn ? (Cloud.email() || 'signed in')
+                          : (Cloud.enabled() ? 'Not signed in' : 'Local play')}</small>
+        ${ident && ident.code ? `<small class="profile-code">League ${ident.code}</small>` : ''}
+      </div>
+    </div>
+    <div class="profile-stats">
+      <div><span>Bankroll</span><strong>${money(s.bankroll)}</strong></div>
+      <div><span>This week</span><strong class="${s.realizedPL >= 0 ? 'positive' : 'negative'}">${s.realizedPL >= 0 ? '+' : ''}${money(s.realizedPL)}</strong></div>
+      <div><span>ROI</span><strong>${s.roi === null ? '—' : `${s.roi >= 0 ? '+' : ''}${s.roi.toFixed(0)}%`}</strong></div>
+      <div><span>All-time</span><strong>${lt ? `${lt.profit >= 0 ? '+' : ''}${money(lt.profit)}` : '—'}</strong></div>
+    </div>
+    <div id="avatarPicker" class="avatar-picker" hidden>
+      <p class="avatar-hint">Pick a colour</p>
+      <div class="swatches">${AVATAR_COLORS.map(c =>
+        `<button class="swatch ${c === a.color ? 'on' : ''}" style="background:${c}" data-av-color="${c}" aria-label="colour"></button>`).join('')}</div>
+      <p class="avatar-hint">Pick a badge</p>
+      <div class="emojis">${AVATAR_EMOJI.map(e =>
+        `<button class="emoji ${e === a.emoji ? 'on' : ''}" data-av-emoji="${e}">${e || '–'}</button>`).join('')}</div>
+    </div>
+    <div class="profile-divider"></div>
+    <button data-profile-action="friends">Leaderboard &amp; groups</button>
+    <button data-profile-action="bets">My bets</button>
+    <button data-profile-action="help">Help &amp; feedback</button>
+    <div class="profile-divider"></div>
+    ${signedIn
+      ? '<button data-profile-action="signout">Sign out</button>'
+      : (Cloud.enabled() ? '<button data-profile-action="signin" class="accent">Sign in / create account</button>' : '')}`;
+
+  const edit = document.getElementById('avatarEdit');
+  const picker = document.getElementById('avatarPicker');
+  if (edit) edit.onclick = () => { picker.hidden = !picker.hidden; };
+
+  const saveAvatar = patch => {
+    const local = Object.assign({ color: a.color, emoji: a.emoji }, Store.get(KEYS.avatar, {}) || {}, patch);
+    Store.set(KEYS.avatar, local);
+    if (Cloud.enabled() && Cloud.signedIn() && Cloud.profile) {
+      Cloud.saveProfile(Cloud.profile.display_name, Cloud.profile.league_code || '',
+        { avatar_color: local.color, avatar_emoji: local.emoji })
+        .catch(e => console.warn('[VIG] avatar not saved:', e && e.message));
+    }
+    renderProfileCard();
+    renderAccountChip();
+    renderHeaderAvatar();
+    const open = document.getElementById('avatarPicker');
+    if (open) open.hidden = false;
+  };
+  box.querySelectorAll('[data-av-color]').forEach(b => b.onclick = () => saveAvatar({ color: b.dataset.avColor }));
+  box.querySelectorAll('[data-av-emoji]').forEach(b => b.onclick = () => saveAvatar({ emoji: b.dataset.avEmoji }));
+
+  box.querySelectorAll('[data-profile-action]').forEach(btn => btn.addEventListener('click', () => {
+    const action = btn.dataset.profileAction;
+    box.classList.remove('open');
+    if (action === 'friends') switchView('friends');
+    else if (action === 'bets') switchView('bets');
+    else if (action === 'signin') openAuth('Sign in to save your bets.');
+    else if (action === 'signout') { Cloud.signOut().then(onAuthChanged); showToast('Signed out.'); }
+    else showToast('Feedback tools arrive before public beta.');
+  }));
+}
+
+function renderHeaderAvatar() {
+  const el = document.getElementById('profileAvatar');
+  if (!el) return;
+  const a = avatarOf(Cloud.profile, getIdentity());
+  el.style.background = a.color;
+  el.textContent = a.emoji || a.initials;
+}
+
+function renderAccountChip() {
+  const chip = document.getElementById('accountChip');
+  if (!chip) return;
+  if (!Cloud.enabled()) { chip.hidden = true; return; }
+  chip.hidden = false;
+  if (Cloud.signedIn()) {
+    const offline = cloudUnreachable();
+    const local = getIdentity();
+    const name = (Cloud.profile && Cloud.profile.display_name)
+      || (local && local.name) || 'Account';
+    const av = avatarOf(Cloud.profile, local);
+    chip.innerHTML = `${avatarHtml(av, 'sm')}<span>${name}</span>${offline ? '<span class="chip-dot off"></span>' : ''}`;
+    chip.onclick = offline
+      ? () => openAuth('')
+      : () => switchView('friends');
+  } else {
+    chip.innerHTML = `<span class="chip-dot"></span><span>Sign in</span>`;
+    chip.onclick = () => openAuth('Sign in to save your bets.');
+  }
+}
+
 /* Debug handle. Open the console and poke at VIG.Fantasy.profile(...)
    or VIG.DataSource.mode while working on this. */
 window.VIG = { Fantasy, Store, DataSource, weekStats, SCORING, METRIC_DEFS,
                get bootErrors() { return bootErrors; }, tzParts, weekKeyFor, nextResetAt, RESET_TZ, RESET_HOUR,
                GolfEvent, Admin, settleGolfEvent, golfTickets, getIdentity, saveIdentity, archiveWeek, blankWeek,
+               Cloud, derivedBankroll, requireAccount,
+               decimalOdds, americanFromDecimal, impliedProb, round2, fmtOdds, combinedAmerican, devigPair, needsAccount, needsProfile, openAuth,
+               refreshLeaderboard, syncFromCloud, AUTH_GATED_VIEWS, cloudUnreachable,
+               get authMode2() { return authMode2; }, set authMode2(v) { authMode2 = v; },
+               Outbox, flushOutbox, renderSyncChip, WEEKLY_BET_LIMIT, WEEKLY_BANKROLL, week, renderProfileCard, avatarOf, AVATAR_COLORS, renderHeaderAvatar,
+               get cloudBoard() { return cloudBoard; },
                updateLifetime, AUTO_ROLLOVER, renderGolfEvent, renderAdmin,
                ROSTER_SLOTS, DRAFT_ROUNDS, assignSlot, ordinal, buildDraftPool,
                gradeDraft, letterFor, slotLetterFor, GRADE_SCALE, SLOT_SCALE, POSITION_LIMITS, positionWeights, DRAFT_DEPTH,

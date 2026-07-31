@@ -1,6 +1,6 @@
 {
-  "eventId": "vig-golf-test-001",
-  "name": "VIG Founders Golf Test",
+  "eventId": "vig-golf-test-002",
+  "name": "VIG Founders Invitational",
   "venue": "Private beta event",
   "startTime": "2026-08-06T08:00:00-04:00",
   "lockTime": "2026-08-06T08:00:00-04:00",
@@ -11,18 +11,26 @@
       "marketId": "tournament-winner",
       "name": "Tournament Winner",
       "selections": [
-        { "selectionId": "g-scheffler", "name": "Scottie Scheffler",  "americanOdds": 450,   "note": "World No. 1" },
-        { "selectionId": "g-mcilroy",   "name": "Rory McIlroy",       "americanOdds": 900 },
-        { "selectionId": "g-schauffele","name": "Xander Schauffele",  "americanOdds": 1200 },
-        { "selectionId": "g-morikawa",  "name": "Collin Morikawa",    "americanOdds": 1400 },
-        { "selectionId": "g-aberg",     "name": "Ludvig Aberg",       "americanOdds": 1600 },
-        { "selectionId": "g-hovland",   "name": "Viktor Hovland",     "americanOdds": 2000 },
-        { "selectionId": "g-cantlay",   "name": "Patrick Cantlay",    "americanOdds": 2500 },
-        { "selectionId": "g-thomas",    "name": "Justin Thomas",      "americanOdds": 2800 },
-        { "selectionId": "g-fleetwood", "name": "Tommy Fleetwood",    "americanOdds": 3300 },
-        { "selectionId": "g-griffin",   "name": "Ben Griffin",        "americanOdds": 8000 },
-        { "selectionId": "g-clark",     "name": "Wyndham Clark",      "americanOdds": 9000 },
-        { "selectionId": "g-field",     "name": "The Field",          "americanOdds": -110, "note": "any golfer not listed" }
+        { "selectionId": "g-cantlay",    "name": "Patrick Cantlay",   "americanOdds": 700,  "note": "Favourite" },
+        { "selectionId": "g-gerard",     "name": "Ryan Gerard",       "americanOdds": 750 },
+        { "selectionId": "g-fowler",     "name": "Rickie Fowler",     "americanOdds": 800 },
+        { "selectionId": "g-schauffele", "name": "Xander Schauffele", "americanOdds": 1400 },
+        { "selectionId": "g-brennan",    "name": "Michael Brennan",   "americanOdds": 2000 },
+        { "selectionId": "g-bradley",    "name": "Keegan Bradley",    "americanOdds": 2250 },
+        { "selectionId": "g-ghim",       "name": "Doug Ghim",         "americanOdds": 3000 },
+        { "selectionId": "g-novak",      "name": "Andrew Novak",      "americanOdds": 3000 },
+        { "selectionId": "g-greyserman", "name": "Max Greyserman",    "americanOdds": 3000 },
+        { "selectionId": "g-hossler",    "name": "Beau Hossler",      "americanOdds": 3000 },
+        { "selectionId": "g-dunlap",     "name": "Nick Dunlap",       "americanOdds": 4000 },
+        { "selectionId": "g-yu",         "name": "Kevin Yu",          "americanOdds": 4000 },
+        { "selectionId": "g-knapp",      "name": "Jake Knapp",        "americanOdds": 4000 },
+        { "selectionId": "g-smalley",    "name": "Alex Smalley",      "americanOdds": 4000 },
+        { "selectionId": "g-thompson",   "name": "Davis Thompson",    "americanOdds": 5000 },
+        { "selectionId": "g-stevens",    "name": "Sam Stevens",       "americanOdds": 5000 },
+        { "selectionId": "g-hall",       "name": "Harry Hall",        "americanOdds": 5000 },
+        { "selectionId": "g-whaley",     "name": "Vince Whaley",      "americanOdds": 5000 },
+        { "selectionId": "g-mccarty",    "name": "Matt McCarty",      "americanOdds": 5000 },
+        { "selectionId": "g-field",      "name": "The Field",         "americanOdds": 250,  "note": "any golfer not listed" }
       ]
     }
   ]

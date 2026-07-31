@@ -38,12 +38,14 @@
     <button class="nav-btn" data-view="leaderboard">Leaderboard</button>
     <button class="nav-btn" data-view="friends">Friends</button>
   </nav>
+  <button class="sync-chip" id="syncChip" hidden></button>
+  <button class="account-chip" id="accountChip" hidden></button>
   <div class="account-actions">
     <button class="auth-btn login-trigger" data-auth-mode="login">Log in</button>
     <button class="auth-btn auth-primary login-trigger" data-auth-mode="signup">Sign up</button>
   </div>
   <div class="profile-wrap">
-    <button class="profile-btn" id="profileToggle" aria-expanded="false">AP <span>⌄</span></button>
+    <button class="profile-btn" id="profileToggle" aria-expanded="false" aria-label="Your profile"><span class="avatar sm" id="profileAvatar">V</span><span>⌄</span></button>
     <div class="profile-menu" id="profileMenu"><div class="sheet-grip" aria-hidden="true"></div>
       <div class="profile-summary"><div class="profile-avatar">AP</div><div><strong>Antonio Pontigo</strong><span>@antonio</span><small>Joined July 2026</small></div></div>
       <button data-profile-action="profile">View profile</button>
@@ -65,9 +67,9 @@
   <section id="home" class="view active-view">
     <div class="hero-grid">
       <div class="hero-card">
-        <span class="eyebrow">VIG WEEK 1</span>
-        <h1>Put every sports take on the record.</h1>
-        <p>Build realistic mock parlays, run fantasy mock drafts, track your bankroll, and compete with friends without risking real money.</p>
+        <span class="eyebrow">THIS WEEK</span>
+        <h1 class="hero-title">Put every sports take <em>on the record</em>.</h1>
+        <p>Mock parlays, fantasy draft tools and market history. Virtual funds only — no deposits, no cash prizes.</p>
         <div class="hero-actions"><button class="primary" data-jump="parlay">Build a mock parlay</button><button class="secondary" data-jump="fantasy">Start a mock draft</button></div>
         <div class="trust-row"><span>✓ Virtual currency only</span><span>✓ Timestamped picks</span><span>✓ Performance tracking</span></div>
       </div>
@@ -93,7 +95,8 @@
     <section class="panel featured-parlays"><div class="panel-head"><div><span class="eyebrow">FEATURED BUILDS</span><h2>Popular parlays for upcoming games</h2></div><span class="updated">Simulated examples</span></div><div id="featuredParlays" class="featured-parlay-grid"></div></section>
     <div class="builder-grid">
       <section class="panel"><div class="filter-row"><button class="filter active" data-filter="all">All</button><button class="filter" data-filter="nfl">NFL</button><button class="filter" data-filter="golf">Golf</button><button class="filter" data-filter="tennis">Tennis</button><button class="filter" data-filter="soccer">Soccer</button><button class="filter" data-filter="fantasy">Fantasy</button></div><div id="marketList" class="market-list"></div></section>
-      <aside class="panel ticket-card"><div class="panel-head"><div><span class="eyebrow">YOUR SLIP</span><h2>Mock parlay</h2></div><button id="clearSlip" class="text-btn">Clear</button></div><div id="selectedLegs" class="selected-legs empty-state">Choose at least two picks to build a parlay.</div><div class="ticket-summary"><label>Virtual stake<input id="stakeInput" type="number" min="1" max="1000" value="25" /></label><div><span>Parlay odds</span><strong id="combinedOdds">—</strong></div><div><span>Potential return</span><strong id="potentialReturn">$0.00</strong></div></div><button id="placeMockBet" class="full primary" disabled>Place mock ticket</button><p class="disclaimer">Entertainment simulation only. No real-money wagering, deposits, or cash prizes.</p></aside>
+      <aside class="panel ticket-card"><div class="panel-head"><div><span class="eyebrow">YOUR SLIP</span><h2>Mock parlay</h2></div><button id="clearSlip" class="text-btn">Clear</button></div><div id="selectedLegs" class="selected-legs empty-state">Choose at least two picks to build a parlay.</div><div class="ticket-summary"><label>Virtual stake<input id="stakeInput" type="number" min="1" max="1000" value="25" /></label><div><span>Parlay odds</span><strong id="combinedOdds">—</strong></div><div><span>Potential return</span><strong id="potentialReturn">$0.00</strong></div></div><p class="slip-error" id="slipError" hidden></p>
+<button id="placeMockBet" class="full primary" disabled>Place mock ticket</button><p class="disclaimer">Entertainment simulation only. No real-money wagering, deposits, or cash prizes.</p></aside>
     </div>
   </section>
 
@@ -152,7 +155,8 @@
     <div id="trendingBoards" class="trending-boards"></div>
   </section>
 
-  <section id="leaderboard" class="view"><div class="section-title"><div><span class="eyebrow">PRIVATE LEAGUE</span><h1>Weekly leaderboard</h1><p>Ranked by realized profit for the current week. Resets Tuesday 2:00 AM PT.</p></div></div><section class="panel leaderboard-card"><div id="leaderboardList"></div></section><section class="panel draft-results" id="draftResults"></section>
+  <section id="leaderboard" class="view"><div class="section-title"><div><span class="eyebrow">PRIVATE LEAGUE</span><h1>Weekly leaderboard</h1><p>Ranked by realized profit for the current week. Resets Tuesday 2:00 AM PT.</p></div></div><p class="demo-note" id="leaderboardNote" hidden></p>
+<section class="panel leaderboard-card"><div id="leaderboardList"></div></section><section class="panel draft-results" id="draftResults"></section>
     <section class="panel saved-drafts"><div class="panel-head"><div><span class="eyebrow">ARCHIVE</span><h2>Past weeks</h2></div></div><div id="weekHistory"></div></section></section>
 
   <section id="friends" class="view">
@@ -192,17 +196,16 @@
 <nav class="mobile-nav" id="mobileNav" aria-label="Primary"><button class="mobile-nav-btn" data-view="parlay" aria-label="Mock"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5A1.5 1.5 0 0 1 4.5 7h15A1.5 1.5 0 0 1 21 8.5v2a2 2 0 0 0 0 3v2A1.5 1.5 0 0 1 19.5 17h-15A1.5 1.5 0 0 1 3 15.5v-2a2 2 0 0 0 0-3z"/><path d="M14 7v10"/></svg><small>Mock</small></button><button class="mobile-nav-btn" data-view="bets" aria-label="My Bets"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg><small>My Bets</small></button><button class="mobile-nav-btn" data-view="fantasy" aria-label="Fantasy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v6c0 4-3 7.2-7 9-4-1.8-7-5-7-9V6z"/><path d="M9.5 12l1.8 1.8L15 10"/></svg><small>Fantasy</small></button><button class="mobile-nav-btn" data-view="linewinder" aria-label="Lines"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 17l5-5 3.5 3.5L21 6"/><path d="M15 6h6v6"/></svg><small>Lines</small></button><button class="mobile-nav-btn" data-view="friends" aria-label="Friends"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0"/><path d="M16 5.5a3 3 0 0 1 0 5"/><path d="M17.5 20a6 6 0 0 0-2-4.5"/></svg><small>Friends</small></button></nav>
 <div class="identity-gate" id="identityGate">
   <div class="identity-card">
-    <span class="eyebrow">WELCOME TO VIG</span>
-    <h2>Pick a display name</h2>
-    <p>This is how you appear on the private leaderboard. Virtual funds only — no real money, deposits or prizes.</p>
-    <label>Display name<input id="identityName" type="text" maxlength="24" placeholder="e.g. Antonio" autocomplete="nickname"></label>
-    <label>League code <small>(optional)</small><input id="identityCode" type="text" maxlength="8" placeholder="VIG01"></label>
-    <p class="identity-error" id="identityError"></p>
-    <button class="full primary" id="identitySave">Start with $1,000 virtual</button>
+    <button class="auth-close" id="authCloseBtn" aria-label="Close">×</button>
+    <div class="auth-brand"><div class="logo small"><span class="logo-v">V</span><span class="logo-cut"></span></div>
+      <div><strong>VIG</strong><span>Mock Sports Book · Fantasy Tools</span></div></div>
+    <p class="auth-reason" id="authReason" hidden></p>
+    <div id="authBody"></div>
   </div>
 </div>
 <div id="bootError" class="boot-error" hidden></div>
 <div id="toast" class="toast"></div>
+<script src="config.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

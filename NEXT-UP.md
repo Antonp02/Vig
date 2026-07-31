@@ -1,5 +1,67 @@
 # VIG — work plan
 
+
+## v1.5 — Accounts (decided)
+
+**Signup is optional.** Fantasy tools and Line Winder stay open to everyone. An
+account is required only to place a mock bet, view My Bets, or appear on the
+leaderboard — the things that genuinely need identity.
+
+**Auth:** Supabase email magic link. No passwords, no reset flow, nothing to
+breach. Hosted on GitHub Pages — the client SDK runs in the browser, so no
+serverless functions are needed. Redirect URL in the Supabase dashboard must be
+set to `https://antonp02.github.io/Vig/`.
+
+### Required copy on the sign-in screen
+
+Verbatim, above the email field:
+
+> We use your email to sign you in and save your bets. Nothing else.
+> No marketing, never shared.
+
+And it has to stay true. No newsletter, no export, no third party.
+
+### Email handling rules
+
+- The email lives in Supabase's `auth.users` and is **never copied into our own
+  tables**. `profiles` holds a display name and a user UUID, nothing more.
+- App JavaScript never reads or transmits an email address.
+- RLS policies gate every table. The anon key is public by design; the policies
+  are what make that safe.
+
+### Tables
+
+```
+profiles   user_id (uuid, FK auth.users) · display_name · league_code · created_at
+bets       id · user_id · week_key · kind · event_id · market_id · selection_id
+           stake · odds · potential_return · status · placed_at · settled_at · legs
+weeks      user_id · week_key · profit · roi · hit_rate · bets_used · archived_at
+events     event_id · name · lock_time · status · winner_selection_id · markets
+```
+
+All-time ROI is a **query over `bets`**, not a stored counter — so it cannot
+drift, and correcting a bad settlement fixes every downstream figure
+automatically.
+
+### Seeing how many users you have
+
+1. **Supabase dashboard → Authentication → Users** — full list with signup dates.
+2. **Dashboard → Reports** — monthly active users over time.
+3. **In-app** — `select count(*) from profiles`. The leaderboard already needs a
+   policy letting signed-in users read profiles, so the count comes free. Worth
+   surfacing in the admin panel next to the lifetime stats.
+
+### Free-tier pause
+
+Free projects pause after 7 days with no database activity and need a manual
+resume (~30s). With twelve users and a quiet week that is a real risk. Two outs:
+
+- A free UptimeRobot monitor pinging every 5 minutes (5 minutes to set up), or
+- **v1.6's snapshot cron**, which writes hourly and keeps the project awake by
+  itself. The pause problem disappears once that ships.
+
+---
+
 ## Road to v1.7 (the official URL)
 
 | Version | Ships | Notes |

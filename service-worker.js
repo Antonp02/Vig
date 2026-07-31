@@ -14,13 +14,13 @@
      icons, manifest, data-> cache first, refreshed in the background
      /api/*               -> never cached, it is live odds
 --------------------------------------------------------------- */
-const VERSION = 'v1.4.2';
+const VERSION = 'v1.5.1';
 const SHELL = `vig-shell-${VERSION}`;
 const ASSETS = `vig-assets-${VERSION}`;
 
 /* Enough to boot offline. Everything else fills in as it is used. */
 const PRECACHE = [
-  './', './index.html', './app.js', './styles.css',
+  './', './index.html', './app.js', './styles.css', './config.js',
   './manifest.webmanifest',
   './data/fantasy-2025.json',
   './icons/icon-192.png', './icons/icon-512.png',

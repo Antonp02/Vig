@@ -508,3 +508,97 @@ button,select,input,a{touch-action:manipulation}
   .golf-row{grid-template-columns:1fr auto 64px;gap:8px}
   .admin-grid{grid-template-columns:1fr}
 }
+
+/* ===================== v1.5 — accounts ===================== */
+.account-chip{display:flex;align-items:center;gap:7px;border:1px solid var(--line);
+  background:transparent;color:var(--text);padding:9px 13px;border-radius:999px;
+  font-weight:750;font-size:12px;white-space:nowrap}
+.account-chip:hover{background:var(--panel2)}
+.account-chip[hidden]{display:none}
+.chip-dot{width:7px;height:7px;border-radius:50%;background:var(--muted);flex:0 0 auto}
+.chip-dot.on{background:#4ad991;box-shadow:0 0 0 3px rgba(74,217,145,.16)}
+.identity-card{position:relative}
+.auth-close{position:absolute;right:14px;top:10px;border:0;background:transparent;
+  color:var(--muted);font-size:26px;line-height:1;padding:4px 8px}
+.auth-reason{margin:0 0 14px;padding:9px 12px;border-left:3px solid var(--accent);
+  background:rgba(40,117,203,.09);color:var(--text);font-size:13px;line-height:1.5}
+.auth-reason[hidden]{display:none}
+.auth-privacy{margin:0 0 14px;color:var(--muted);font-size:11px;line-height:1.55;
+  border-left:3px solid var(--line);padding:8px 11px}
+.demo-note{margin:0 0 12px;color:var(--gold);font-size:11px;line-height:1.5;
+  border-left:3px solid var(--gold);padding:8px 11px;background:rgba(232,189,105,.06)}
+.demo-note[hidden]{display:none}
+#authBody h2{font-size:24px;margin:8px 0}
+#authBody>p{color:var(--muted);line-height:1.55;margin:0 0 18px;font-size:13px}
+#authBody label{display:block;color:var(--muted);font-size:12px;margin-bottom:14px}
+#authBody input{display:block;width:100%;margin-top:7px;background:#0a111c;border:1px solid var(--line);
+  color:var(--text);padding:13px;border-radius:10px;font-size:16px}
+@media(max-width:700px){
+  .account-chip{order:2;min-height:44px}
+  .identity-card{padding:22px 18px calc(22px + env(safe-area-inset-bottom))}
+  .identity-gate{align-items:flex-end;padding:0}
+  .identity-gate .identity-card{width:100%;border-radius:18px 18px 0 0;max-height:92vh;overflow:auto}
+  #authBody h2{font-size:21px}
+}
+.chip-dot.off{background:var(--gold);box-shadow:0 0 0 3px rgba(232,189,105,.16)}
+
+/* ===================== v1.5.1 — home, profile, sync ===================== */
+/* Hero was plain white and shouted. Silver-to-blue gradient with the
+   emphasised half in brand blue reads calmer and matches the logo. */
+.hero-title{
+  background:linear-gradient(165deg,#e8ecf2 0%,var(--silver) 46%,#7ea6d8 100%);
+  -webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent}
+.hero-title em{font-style:normal;
+  background:linear-gradient(165deg,#5f97e0 0%,var(--accent) 55%,#1f5aa8 100%);
+  -webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent}
+.hero-card{background:linear-gradient(150deg,rgba(19,32,54,.96),rgba(11,17,27,.98))}
+.hero-card p{max-width:520px}
+.trust-row{opacity:.85}
+
+.sync-chip{border:1px solid var(--gold);background:rgba(232,189,105,.1);color:var(--gold);
+  padding:8px 12px;border-radius:999px;font-weight:750;font-size:11px;white-space:nowrap}
+.sync-chip[hidden]{display:none}
+
+.avatar{display:inline-grid;place-items:center;border-radius:50%;color:#08101a;
+  font-weight:900;flex:0 0 auto;line-height:1;overflow:hidden}
+.avatar.sm{width:26px;height:26px;font-size:11px}
+.avatar.lg{width:56px;height:56px;font-size:20px}
+.avatar em{font-style:normal;font-size:1.15em}
+.account-chip .avatar{margin-right:-2px}
+.profile-btn{gap:6px;padding:0 10px}
+
+.profile-card{display:flex;align-items:center;gap:13px;padding:6px 9px 14px}
+.avatar-btn{position:relative;border:0;background:transparent;padding:0;line-height:0}
+.avatar-pencil{position:absolute;right:-3px;bottom:-3px;width:20px;height:20px;border-radius:50%;
+  background:var(--panel2);border:1px solid var(--line);color:var(--text);font-size:10px;
+  display:grid;place-items:center}
+.profile-who strong{display:block;font-size:15px}
+.profile-who small{display:block;color:var(--muted);font-size:11px;margin-top:3px;
+  max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.profile-code{color:var(--accent-soft)!important}
+.profile-stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:0 4px 12px}
+.profile-stats div{padding:9px 11px;border:1px solid var(--line);border-radius:10px;background:rgba(255,255,255,.018)}
+.profile-stats span{display:block;color:var(--muted);font-size:10px}
+.profile-stats strong{display:block;margin-top:4px;font-size:14px}
+.avatar-picker{padding:4px 4px 10px;border-top:1px solid var(--line);margin-top:4px}
+.avatar-picker[hidden]{display:none}
+.avatar-hint{margin:10px 0 7px;color:var(--muted);font-size:10px;letter-spacing:.08em;text-transform:uppercase}
+.swatches{display:grid;grid-template-columns:repeat(8,1fr);gap:6px}
+.swatch{height:26px;border-radius:8px;border:2px solid transparent}
+.swatch.on{border-color:var(--text)}
+.emojis{display:grid;grid-template-columns:repeat(6,1fr);gap:6px}
+.emoji{height:30px;border-radius:8px;border:1px solid var(--line);background:transparent;font-size:15px;color:var(--muted)}
+.emoji.on{border-color:var(--accent);background:var(--accent-dark)}
+.profile-menu>button.accent{color:var(--accent-soft);font-weight:750}
+.auth-tabs{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:16px}
+.auth-tab{border:1px solid var(--line);background:transparent;color:var(--muted);
+  padding:10px;border-radius:9px;font-weight:700;font-size:12px}
+.auth-tab.active{background:var(--accent-dark);color:var(--accent-soft);border-color:#2f5f9c}
+.auth-switch.subtle{color:var(--muted);font-weight:600;font-size:12px;padding:9px}
+@media(max-width:700px){
+  .sync-chip{order:2;min-height:38px}
+  .profile-stats{grid-template-columns:1fr 1fr}
+  .swatches{grid-template-columns:repeat(8,1fr)}
+}
+.slip-error{margin:0 0 10px;color:var(--red);font-size:12px}
+.slip-error[hidden]{display:none}
