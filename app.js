@@ -76,6 +76,51 @@ function impliedProb(american) {
     : Math.abs(american) / (Math.abs(american) + 100);
 }
 
+/* ---- de-vigging -----------------------------------------------------
+   Removing the book's margin to estimate what the market believes.
+   Neither method is "the" true probability — both rest on an assumption
+   about how the book spread its margin across outcomes.
+
+   proportional : divide each implied probability by the overround.
+                  Simple and ancient, but biased: it over-rates longshots
+                  and under-rates favourites.
+   power        : solve for k where sum(p^k) = 1. Handles that
+                  favourite-longshot bias far better, which matters most
+                  in fat-margin markets with many outcomes — golf
+                  outrights being the obvious case.
+--------------------------------------------------------------------- */
+const DEVIG_METHOD = 'power';
+function round4(n) { return Math.round(n * 10000) / 10000; }
+
+function devigProportional(prices) {
+  const raw = prices.map(impliedProb);
+  const total = raw.reduce((a, b) => a + b, 0);
+  return total > 0 ? raw.map(p => p / total) : raw.map(() => 1 / raw.length);
+}
+
+function devigPower(prices) {
+  const raw = prices.map(impliedProb);
+  if (!raw.length) return [];
+  let lo = 0.5, hi = 3.0;
+  for (let i = 0; i < 60; i++) {
+    const k = (lo + hi) / 2;
+    if (raw.reduce((a, p) => a + Math.pow(p, k), 0) > 1) lo = k; else hi = k;
+  }
+  const k = (lo + hi) / 2;
+  const out = raw.map(p => Math.pow(p, k));
+  const total = out.reduce((a, b) => a + b, 0);
+  return total > 0 ? out.map(p => p / total) : out;
+}
+
+/* Fair probability of one selection within its market. The method used is
+   recorded alongside the number so changing the default later never
+   silently rewrites history. */
+function fairProbability(prices, index, method) {
+  const fn = (method || DEVIG_METHOD) === 'proportional' ? devigProportional : devigPower;
+  const v = fn(prices)[index];
+  return (typeof v === 'number' && isFinite(v) && v > 0 && v < 1) ? round4(v) : null;
+}
+
 /* Strip the book's margin from a two-way market so the pair sums to 1.
    Used by Line Winder's probability axis. */
 function devigPair(a, b) {
@@ -202,6 +247,15 @@ function blankWeek(key) {
    and open stake is reported separately as exposure.
 ------------------------------------------------------------ */
 function weekStats(w) {
+  /* FIX: week.bankroll is a cache, and any path that changed a ticket status
+     without recalculating left it stale — a settled bet could leave the stored
+     figure 34.50 adrift from the truth. Derive it here so no consumer can ever
+     read a stale number; the stored value is now only a persistence
+     convenience. */
+  if (w && w.tickets) {
+    const fresh = derivedBankroll(w);
+    if (Math.abs((w.bankroll || 0) - fresh) > 0.001) w.bankroll = fresh;
+  }
   const t = w.tickets;
   /* 'void' is neither a win nor a loss — its stake was refunded, so it must be
      excluded from P/L, hit rate and risked or it reads as a loss. */
@@ -440,6 +494,77 @@ function marketsFromGames(list) {
   return rows;
 }
 
+/* ---------- 4b. Real Week 1 board (v1.5.3) --------------------------
+   Real ESPN numbers with both the opening and current line, so the move
+   between them is genuine rather than generated. Replaces the simulated
+   board for NFL. Everything downstream — parlay builder, home cards,
+   trending — consumes the same market shape as before.
+
+   What is real here: current moneyline, current and opening spread,
+   current and opening total. What is NOT: an opening moneyline, which
+   the source did not carry. So no moneyline "open" is invented.
+------------------------------------------------------------------- */
+const RealBoard = {
+  data: null,
+  async load() {
+    if (this.data) return this.data;
+    if (window.VIG_NFL_WEEK1) { this.data = window.VIG_NFL_WEEK1; return this.data; }
+    const res = await fetch('data/nfl-2026-week1.json');
+    if (!res.ok) throw new Error(`board ${res.status}`);
+    this.data = await res.json();
+    return this.data;
+  },
+  games() { return (this.data && this.data.games) || []; },
+  find(gameId) { return this.games().find(g => g.gameId === gameId) || null; },
+
+  /* open -> current, expressed from the away side */
+  move(gameId) {
+    const g = this.find(gameId);
+    if (!g) return null;
+    return {
+      spread: round2(g.current.spread - g.open.spread),
+      total: round2(g.current.total - g.open.total),
+      openSpread: g.open.spread, curSpread: g.current.spread,
+      openTotal: g.open.total, curTotal: g.current.total
+    };
+  },
+
+  toMarkets() {
+    const out = [];
+    this.games().forEach(g => {
+      const when = new Date(g.kickoff).toLocaleString(undefined,
+        { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+      const mk = (abbr, odds, isAway) => ({
+        id: `${g.gameId}:${abbr}`,
+        gameId: g.gameId,
+        category: 'nfl',
+        title: `${NFL_NAMES[abbr] || abbr} moneyline`,
+        detail: `${g.away} at ${g.home} · ${when}`,
+        odds,
+        /* spread shown from this side */
+        spreadLine: isAway ? g.current.spread : round2(-g.current.spread),
+        total: g.current.total,
+        real: true
+      });
+      out.push(mk(g.away, g.current.mlAway, true));
+      out.push(mk(g.home, g.current.mlHome, false));
+    });
+    return out;
+  }
+};
+
+const NFL_NAMES = {
+  ARI:'Arizona Cardinals', ATL:'Atlanta Falcons', BAL:'Baltimore Ravens', BUF:'Buffalo Bills',
+  CAR:'Carolina Panthers', CHI:'Chicago Bears', CIN:'Cincinnati Bengals', CLE:'Cleveland Browns',
+  DAL:'Dallas Cowboys', DEN:'Denver Broncos', DET:'Detroit Lions', GB:'Green Bay Packers',
+  HOU:'Houston Texans', IND:'Indianapolis Colts', JAX:'Jacksonville Jaguars', KC:'Kansas City Chiefs',
+  LV:'Las Vegas Raiders', LAC:'Los Angeles Chargers', LA:'Los Angeles Rams', LAR:'Los Angeles Rams',
+  MIA:'Miami Dolphins', MIN:'Minnesota Vikings', NE:'New England Patriots', NO:'New Orleans Saints',
+  NYG:'New York Giants', NYJ:'New York Jets', PHI:'Philadelphia Eagles', PIT:'Pittsburgh Steelers',
+  SF:'San Francisco 49ers', SEA:'Seattle Seahawks', TB:'Tampa Bay Buccaneers', TEN:'Tennessee Titans',
+  WAS:'Washington Commanders', WSH:'Washington Commanders'
+};
+
 /* ---------- 5. State ---------- */
 let games = [], markets = [], selected = [], lineTeams = [];
 let snapshots = Store.get(KEYS.snapshots, []);
@@ -558,7 +683,8 @@ function switchView(id) {
   document.querySelectorAll('.mobile-nav-btn').forEach(b =>
     b.classList.toggle('active', b.dataset.view === id));
   updateNavBadges();
-  if (id === 'bets') renderBets(activeBetFilter());
+  if (id === 'bets') { renderBets(activeBetFilter()); renderBetsLive();
+    if (openTickets().length) refreshTickets({ quiet: true }); }
   if (id === 'friends' || id === 'leaderboard') renderCompetition();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -576,13 +702,16 @@ function renderSlipBar() {
   const a = combinedAmerican();
   const stakeEl = document.getElementById('stakeInput');
   const stake = Number((stakeEl && stakeEl.value) || 0);
-  document.getElementById('slipBarLegs').textContent = `${n} leg${n === 1 ? '' : 's'}`;
-  document.getElementById('slipBarOdds').textContent = a === null ? 'add 1 more' : fmtOdds(a);
+  document.getElementById('slipBarLegs').textContent =
+    n === 1 ? 'Straight bet' : `${n}-leg parlay`;
+  document.getElementById('slipBarOdds').textContent = a === null ? '—' : fmtOdds(a);
   document.getElementById('slipBarReturn').textContent =
     a === null ? '—' : `${money(stake * decimalOdds(a))} to win`;
   const place = document.getElementById('slipBarPlace');
   const st = weekStats(week);
-  place.disabled = n < 2 || st.betsLeft <= 0;
+  /* a single leg is a straight bet — this still demanded two, so the bar
+     stayed disabled while the desktop slip was happy to place it */
+  place.disabled = n < 1 || st.betsLeft <= 0 || stake < 1 || stake > week.bankroll;
   place.textContent = st.betsLeft <= 0 ? 'Limit' : 'Place';
 }
 
@@ -610,7 +739,11 @@ function setBadge(btn, n) {
 
 /* ---------- 6. Slip ---------- */
 function combinedAmerican() {
-  if (selected.length < 2) return null;
+  /* One leg is a straight bet at its own price; two or more multiply into
+     a parlay. Previously a single pick returned null and the slip refused
+     to place it at all. */
+  if (!selected.length) return null;
+  if (selected.length === 1) return selected[0].odds;
   const d = selected.reduce((a, m) => a * decimalOdds(m.odds), 1);
   const am = americanFromDecimal(d);
   return isFinite(am) ? am : null;
@@ -638,10 +771,36 @@ function marketRow(m) {
   const edge = m.edge > 0 ? `<span class="edge-chip">+${m.edge.toFixed(1)}% value</span>` : '';
   return `<div class="market-row">
     <div class="market-meta"><span>${m.title} ${edge}</span>
-      <small>${m.detail} · ${m.category.toUpperCase()}</small>${shop}</div>
+      <small>${m.detail} · ${m.category.toUpperCase()}${realMove(m)}</small>${shop}</div>
     <div class="pick-actions"><span class="odds">${fmtOdds(m.odds)}</span>
-      <button class="add-btn" data-add="${m.id}">${selected.some(s => s.id === m.id) ? 'Added' : 'Add'}</button></div>
+      ${addButton(m)}</div>
   </div>`;
+}
+
+/* The genuine open -> current move, shown only where it is real. */
+function realMove(m) {
+  if (!m.real || !RealBoard.data) return '';
+  const mv = RealBoard.move(m.gameId);
+  if (!mv) return '';
+  const bits = [];
+  if (mv.spread) {
+    const away = (m.id || '').endsWith(':' + (RealBoard.find(m.gameId) || {}).away);
+    const d = away ? mv.spread : -mv.spread;
+    bits.push(`<em class="mv ${d < 0 ? 'good' : 'bad'}">${d > 0 ? '+' : ''}${d} spread</em>`);
+  }
+  if (mv.total) bits.push(`<em class="mv">${mv.total > 0 ? '+' : ''}${mv.total} total</em>`);
+  return bits.length ? ` · ${bits.join(' ')}` : '';
+}
+
+/* One control, three states. Empty slip -> "Bet" (a straight bet).
+   Something already on it -> "Add to parlay", in the parlay colour, so it
+   is obvious you are building rather than replacing. Already picked ->
+   "Added", and tapping again removes it, same as the x in the slip. */
+function addButton(m) {
+  const on = selected.some(s => s.id === m.id);
+  if (on) return `<button class="add-btn added" data-add="${m.id}">Added ✕</button>`;
+  if (!selected.length) return `<button class="add-btn" data-add="${m.id}">Bet</button>`;
+  return `<button class="add-btn to-parlay" data-add="${m.id}">Add to parlay</button>`;
 }
 
 function renderMarkets(filter = 'all') {
@@ -655,7 +814,7 @@ function renderSlip() {
   const box = document.getElementById('selectedLegs');
   if (!selected.length) {
     box.className = 'selected-legs empty-state';
-    box.textContent = 'Choose at least two picks to build a parlay.';
+    box.textContent = 'Tap a price to start. One pick is a straight bet, two or more builds a parlay.';
   } else {
     box.className = 'selected-legs';
     box.innerHTML = selected.map(m => `<div class="selected-leg">
@@ -671,7 +830,7 @@ function renderSlip() {
      user tap Place and bounce off a toast. */
   const stakeVal = Number((document.getElementById('stakeInput') || {}).value || 0);
   let reason = '';
-  if (selected.length < 2) reason = '';
+  if (!selected.length) reason = '';
   else if (s.betsLeft <= 0) reason = `You have used all ${WEEKLY_BET_LIMIT} bets this week.`;
   else if (!(stakeVal >= 1)) reason = 'Minimum virtual stake is $1.';
   else if (stakeVal > week.bankroll) reason = `Stake exceeds your virtual bankroll of ${money(week.bankroll)}.`;
@@ -680,11 +839,21 @@ function renderSlip() {
   if (note) { note.textContent = reason; note.hidden = !reason; }
 
   const btn = document.getElementById('placeMockBet');
-  btn.disabled = selected.length < 2 || !!reason;
+  btn.disabled = !selected.length || !!reason;
   btn.textContent = s.betsLeft <= 0 ? 'Weekly limit reached'
-    : reason ? 'Check your stake' : 'Place mock ticket';
+    : reason ? 'Check your stake'
+    : selected.length === 1 ? 'Place straight bet'
+    : `Place ${selected.length}-leg parlay`;
+
+  /* the slip heading and the odds label follow suit */
+  const kind = document.getElementById('slipKind');
+  if (kind) kind.textContent = !selected.length ? 'Bet slip'
+    : selected.length === 1 ? 'Straight bet' : `${selected.length}-leg parlay`;
+  const oddsLabel = document.getElementById('slipOddsLabel');
+  if (oddsLabel) oddsLabel.textContent = selected.length > 1 ? 'Parlay odds' : 'Odds';
   updateNavBadges();
   renderSlipBar();
+  if (typeof renderHomeGames === 'function') renderHomeGames();
 }
 
 function updateReturn() {
@@ -705,11 +874,26 @@ function placeTicket() {
     showToast('Choose a valid stake within your weekly bankroll.');
     return;
   }
+  /* Snapshot what the market believed right now — the one piece of CLV
+     that cannot be reconstructed later. For a parlay it is the product of
+     each leg's de-vigged two-way price. */
+  const legFair = selected.map(m => {
+    const opp = markets.find(x => x.gameId === m.gameId && x.id !== m.id);
+    if (!opp) return null;
+    const pair = devigPair(m.odds, opp.odds);
+    return (pair && isFinite(pair[0])) ? pair[0] : null;
+  });
+  const parlayFair = legFair.every(v => typeof v === 'number' && v > 0)
+    ? round4(legFair.reduce((x, y) => x * y, 1)) : null;
+
   week.tickets.unshift({
     id: `VIG-${week.key.replace(/-/g, '')}-${String(week.tickets.length + 1).padStart(2, '0')}`,
     date: new Date().toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }),
     status: 'open', stake, odds: a,
     returnAmount: round2(stake * decimalOdds(a)),
+    fairProb: parlayFair,
+    fairMethod: parlayFair === null ? null : 'proportional',
+    bookPrices: { book: 'vig-sim', legs: selected.map(m => ({ id: m.id, odds: m.odds })) },
     legs: selected.map(m => ({ title: m.title, odds: m.odds, gameId: m.gameId }))
   });
   week.bankroll = derivedBankroll(week);
@@ -821,16 +1005,27 @@ function renderRecentBets() {
     || '<div class="empty-state">No tickets this week yet.</div>';
 }
 
+/* "1-leg mock parlay" is a contradiction. Name what it actually is. */
+function betLabel(t) {
+  const n = (t.legs && t.legs.length) || 1;
+  if (t.kind === 'golf') return 'Golf outright';
+  return n === 1 ? 'Straight bet' : `${n}-leg parlay`;
+}
+
 function renderBets(status = 'all') {
   const data = week.tickets.filter(t => status === 'all' || t.status === status);
   document.getElementById('betHistory').innerHTML = data.length ? data.map(t =>
     `<article class="bet-card">
       <div class="bet-card-head"><span class="status ${t.status}">${t.status}</span><small>${t.id} · ${t.date}</small></div>
-      <h3>${t.legs.length}-leg mock parlay <span class="odds">${fmtOdds(t.odds)}</span></h3>
+      <h3>${betLabel(t)} <span class="odds">${fmtOdds(t.odds)}</span></h3>
       <ol class="bet-legs">${t.legs.map(l => `<li>${l.title}${validOdds(l.odds) ? ` <span class="odds">${fmtOdds(l.odds)}</span>` : ''}</li>`).join('')}</ol>
       <div class="bet-card-foot">
         <div><span>Stake</span><strong>${money(t.stake)}</strong></div>
         <div><span>${t.status === 'won' ? 'Paid' : t.status === 'lost' ? 'Return' : (t.status === 'void' || t.status === 'push') ? 'Refunded' : 'To win'}</span><strong>${money(t.returnAmount)}</strong></div>
+        ${typeof t.fairProb === 'number' ? `<div><span>Market at entry</span><strong>${(t.fairProb * 100).toFixed(1)}%${
+          typeof t.closeProb === 'number'
+            ? ` <em class="clv ${t.closeProb > t.fairProb ? 'good' : 'bad'}">${t.closeProb > t.fairProb ? '+' : ''}${((t.closeProb - t.fairProb) * 100).toFixed(1)} CLV</em>`
+            : ''}</strong></div>` : ''}
       </div></article>`).join('')
     : '<div class="empty-state">No tickets in this category.</div>';
 
@@ -858,15 +1053,56 @@ const FEATURED = [
   { name: 'Four-Game Sunday Card', picks: ['buf-mia:BUF', 'dal-phi:PHI', 'cin-cle:CIN', 'sf-sea:SF'], stake: 10 }
 ];
 
+/* Composed from the live board rather than a fixed list. One leg per game,
+   so no card can ever contain both sides of a matchup. */
+function buildFeatured() {
+  const nfl = markets.filter(m => m.category === 'nfl' && typeof m.odds === 'number');
+  if (nfl.length < 4) return [];
+  const byGame = {};
+  nfl.forEach(m => (byGame[m.gameId] = byGame[m.gameId] || []).push(m));
+  const games = Object.values(byGame).filter(p => p.length === 2);
+  if (games.length < 2) return [];
+
+  const favOf = p => p[0].odds <= p[1].odds ? p[0] : p[1];
+  const dogOf = p => p[0].odds <= p[1].odds ? p[1] : p[0];
+  const take = (arr, n) => arr.slice(0, n);
+
+  /* shortest-priced favourites, longest-priced dogs, closest to even */
+  const byFav = games.slice().sort((a, b) => favOf(a).odds - favOf(b).odds);
+  const byDog = games.slice().sort((a, b) => dogOf(b).odds - dogOf(a).odds);
+  const byClose = games.slice().sort((a, b) =>
+    Math.abs(impliedProb(favOf(a).odds) - 0.5) - Math.abs(impliedProb(favOf(b).odds) - 0.5));
+
+  const cards = [
+    { name: 'Three chalk',      stake: 25, legs: take(byFav, 3).map(favOf) },
+    { name: 'Longshot ticket',  stake: 10, legs: take(byDog, 3).map(dogOf) },
+    { name: 'Coin flips',       stake: 20, legs: take(byClose, 2).map(favOf) },
+    { name: 'Favourite double', stake: 25, legs: take(byFav, 2).map(favOf) },
+    { name: 'Dog and chalk',    stake: 15, legs: [dogOf(byDog[0]), favOf(byFav[0])] }
+  ];
+
+  return cards
+    .map(c => {
+      /* dedupe by game, then by market, so a card is always internally sane */
+      const seen = new Set(), legs = [];
+      c.legs.forEach(l => {
+        if (!l || seen.has(l.gameId)) return;
+        seen.add(l.gameId); legs.push(l);
+      });
+      return { ...c, legs };
+    })
+    .filter(c => c.legs.length >= 2);
+}
+
 function renderFeatured() {
   const box = document.getElementById('featuredParlays');
   if (!box) return;
-  const valid = FEATURED.map(p => {
-    const legs = p.picks.map(id => markets.find(m => m.id === id)).filter(Boolean);
-    const ids = legs.map(l => l.gameId);
-    const clash = ids.some((g, i) => g && ids.indexOf(g) !== i);
-    return { ...p, legs, clash };
-  }).filter(p => p.legs.length >= 2 && !p.clash);
+  /* FIX: these were hardcoded against the old simulated board, so once the
+     real games landed every card pointed at fixtures that no longer exist —
+     buf-mia when the board says buf-hou. A card built on a phantom game can
+     never settle. Cards are now composed FROM whatever is on the board, so
+     they cannot go stale when the board is refreshed. */
+  const valid = buildFeatured();
 
   box.innerHTML = valid.map((p, i) => {
     const odds = americanFromDecimal(p.legs.reduce((a, l) => a * decimalOdds(l.odds), 1));
@@ -874,16 +1110,41 @@ function renderFeatured() {
       <div class="featured-parlay-top"><span>${p.name}</span><strong>${fmtOdds(odds)}</strong></div>
       <ol>${p.legs.map(l => `<li>${l.title.replace(' moneyline', '')} ${fmtOdds(l.odds)}</li>`).join('')}</ol>
       <div class="featured-parlay-foot"><span>${p.legs.length} legs · ${money(p.stake)} mock stake</span>
-        <button class="add-btn" data-featured="${i}">Load slip</button></div></article>`;
+        <span class="featured-actions">
+          <button class="add-btn" data-featured="${i}">Bet</button>
+          <button class="add-btn to-parlay" data-featured-add="${i}">Add to parlay</button>
+        </span></div></article>`;
   }).join('') || '<div class="empty-state">No featured builds for this board.</div>';
 
+  /* Bet = take this card as your slip. Add to parlay = append its legs to
+     whatever is already there, skipping anything that would collide. */
   box.querySelectorAll('[data-featured]').forEach(b => b.onclick = () => {
     const p = valid[Number(b.dataset.featured)];
     selected = p.legs.slice();
     document.getElementById('stakeInput').value = p.stake;
     renderMarkets(activeFilter());
     renderSlip();
-    showToast(`${p.name} loaded into your mock slip.`);
+    renderHomeGames();
+    switchView('parlay');
+    showToast(`${p.name} ready — set your stake and place it.`);
+  });
+
+  box.querySelectorAll('[data-featured-add]').forEach(b => b.onclick = () => {
+    const p = valid[Number(b.dataset.featuredAdd)];
+    let added = 0, skipped = 0;
+    p.legs.forEach(leg => {
+      if (selected.some(x => x.id === leg.id)) { skipped++; return; }
+      /* never both sides of one game */
+      if (selected.some(x => x.gameId && x.gameId === leg.gameId)) { skipped++; return; }
+      selected.push(leg);
+      added++;
+    });
+    renderMarkets(activeFilter());
+    renderSlip();
+    renderHomeGames();
+    showToast(added
+      ? `${added} leg${added === 1 ? '' : 's'} added${skipped ? `, ${skipped} skipped` : ''}. Now a ${selected.length}-leg parlay.`
+      : 'Those picks are already on your slip.');
   });
 }
 
@@ -2191,6 +2452,177 @@ function renderTicker() {
   if (count) count.textContent = `${games.length} games`;
 }
 
+/* ---------- 12b1. Live bet tracking ---------------------------------
+   Open tickets need to reflect reality without a page reload. Right now
+   the only thing that can change a status is an admin settling an event,
+   which happens in the database — so this polls for it. When the live
+   odds feed lands at v1.7 the same loop carries score-driven settlement,
+   because the plumbing is identical: pull, diff, re-render, notify.
+------------------------------------------------------------------- */
+let lastSync = null;
+let trackTimer = null;
+
+function openTickets() { return week.tickets.filter(t => t.status === 'open'); }
+
+/* Pull current status for this week's tickets and apply any changes.
+   Returns the list of tickets whose status actually moved. */
+async function refreshTickets({ quiet = false } = {}) {
+  if (!(Cloud.enabled() && Cloud.signedIn())) {
+    lastSync = Date.now();
+    renderBetsLive();
+    return [];
+  }
+  /* Deliberately no "skip if unreachable" guard here. That made the flag a
+     one-way latch: once set, nothing ever tried again, so the app could
+     never notice the server had come back. One request a minute is not
+     hammering anyone — let the result decide. */
+  let remote;
+  try {
+    remote = await Cloud.myBets(week.key);
+  } catch (e) {
+    Cloud.reachable = false;
+    renderBetsLive();
+    return [];
+  }
+  Cloud.reachable = true;          // the call came back, so we are online again
+  if (Cloud.profileUnknown) Cloud.loadProfile().then(() => { renderAccountChip(); renderBetsLive(); });
+  const byId = {};
+  remote.forEach(t => (byId[t.id] = t));
+  const changed = [];
+  week.tickets = week.tickets.map(local => {
+    const r = byId[local.id];
+    if (!r) return local;                       // queued locally, not yet sent
+    if (r.status !== local.status || r.closeProb !== local.closeProb) changed.push(r);
+    return r;
+  });
+  /* anything the server has that we do not — a bet placed on another
+     device. This was being added to state but never re-rendered, because
+     only status CHANGES triggered a redraw. */
+  let added = 0;
+  remote.forEach(r => {
+    if (!week.tickets.some(t => t.id === r.id)) { week.tickets.push(r); added++; }
+  });
+  if (added) week.tickets.sort((a, b) =>
+    String(b.placedAt || '').localeCompare(String(a.placedAt || '')));
+
+  week.bankroll = derivedBankroll(week);
+  lastSync = Date.now();
+  persist();
+  renderBetsLive();
+  if (changed.length || added) {
+    renderBets(activeBetFilter());
+    updateDashboard();
+    refreshLeaderboard();
+    if (!quiet && added && !changed.length) {
+      showToast(`${added} bet${added === 1 ? '' : 's'} synced from another device.`);
+    }
+    if (!quiet && changed.length) {
+      const won = changed.filter(t => t.status === 'won').length;
+      showToast(won ? `${won} bet${won === 1 ? '' : 's'} won.`
+                    : `${changed.length} bet${changed.length === 1 ? '' : 's'} settled.`);
+    }
+  }
+  return changed;
+}
+
+function renderBetsLive() {
+  const label = document.getElementById('betsUpdated');
+  const dot = document.getElementById('betsLiveDot');
+  if (!label || !dot) return;
+  const open = openTickets().length;
+  if (!Cloud.enabled()) {
+    label.textContent = open ? `${open} open · local only` : 'Local only';
+    dot.className = 'live-dot off';
+    return;
+  }
+  if (!Cloud.signedIn()) { label.textContent = 'Sign in to track bets'; dot.className = 'live-dot off'; return; }
+  if (cloudUnreachable()) { label.textContent = 'Server unreachable'; dot.className = 'live-dot warn'; return; }
+  const ago = lastSync ? Math.round((Date.now() - lastSync) / 1000) : null;
+  const when = ago === null ? 'never'
+    : ago < 5 ? 'just now'
+    : ago < 60 ? `${ago}s ago`
+    : `${Math.round(ago / 60)}m ago`;
+  label.textContent = open ? `${open} open · updated ${when}` : `Updated ${when}`;
+  dot.className = open ? 'live-dot on' : 'live-dot idle';
+}
+
+/* Poll only while something is actually open, and back off when the tab
+   is hidden so a phone in a pocket is not waking the radio every minute. */
+function startBetTracking() {
+  const tick = () => {
+    if (typeof document !== 'undefined' && document.hidden) return;
+    if (!openTickets().length) { renderBetsLive(); return; }
+    refreshTickets({ quiet: false });
+  };
+  clearInterval(trackTimer);
+  trackTimer = setInterval(tick, 60000);
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && openTickets().length) refreshTickets({ quiet: true });
+    });
+  }
+  const btn = document.getElementById('betsRefresh');
+  if (btn) btn.onclick = async () => {
+    btn.disabled = true; btn.textContent = 'Refreshing…';
+    const changed = await refreshTickets({ quiet: true });
+    btn.disabled = false; btn.textContent = 'Refresh';
+    showToast(changed.length ? `${changed.length} bet${changed.length === 1 ? '' : 's'} updated.` : 'No changes.');
+  };
+  renderBetsLive();
+}
+
+/* ---------- 12b2. Games on the home dashboard ----------------------
+   Driven by the moneyline board, not the schedule. The two do not cover
+   the same fixtures — the board is this week's priced games, the schedule
+   is the full 2026 Week 1 slate — so building from the schedule produced
+   cards with no odds on them. The home screen should show what you can
+   actually bet on. Team names and kickoff times are facts; no logos.
+------------------------------------------------------------------- */
+function renderHomeGames() {
+  const box = document.getElementById('homeGames');
+  if (!box) return;
+  const nfl = markets.filter(m => m.category === 'nfl' && m.gameId);
+  const byGame = {};
+  nfl.forEach(m => (byGame[m.gameId] = byGame[m.gameId] || []).push(m));
+  /* soonest kickoff first — the board now spans Wednesday to Sunday */
+  const order = RealBoard.games().map(g => g.gameId);
+  const ids = Object.keys(byGame)
+    .sort((a, b) => (order.indexOf(a) + 1 || 999) - (order.indexOf(b) + 1 || 999))
+    .slice(0, 6);
+  if (!ids.length) { box.innerHTML = '<div class="empty-state">Board loading…</div>'; return; }
+
+  box.innerHTML = ids.map(id => {
+    const pair = byGame[id];
+    const detail = pair[0].detail || '';
+    const when = detail.includes('·') ? detail.split('·').pop().trim() : id.toUpperCase().replace('-', ' @ ');
+    const abbrOf = m => (m.id || '').split(':').pop();
+    const side = m => {
+      const on = selected.some(x => x.id === m.id);
+      const cls = on ? ' on' : (selected.length ? ' to-parlay' : '');
+      return `<button class="game-side${cls}" data-add="${m.id}" ` +
+             `title="${on ? 'Remove from slip' : selected.length ? 'Add to parlay' : 'Bet this'}">` +
+             `<span>${abbrOf(m)}</span><strong class="odds">${fmtOdds(m.odds)}</strong></button>`;
+    };
+    const g = RealBoard.find(id);
+    const line = g ? `<div class="game-line">${g.away} ${g.current.spread > 0 ? '+' : ''}${g.current.spread} · O/U ${g.current.total}</div>` : '';
+    return `<article class="game-card">
+      <div class="game-when">${when}</div>
+      <div class="game-sides">${pair.slice(0, 2).map(side).join('')}</div>
+      ${line}
+    </article>`;
+  }).join('');
+
+  box.querySelectorAll('[data-add]').forEach(b => b.onclick = () => {
+    const before = selected.length;
+    toggleLeg(b.dataset.add);
+    renderHomeGames();
+    if (selected.length > before) {
+      showToast(selected.length >= 2 ? 'Added — open the slip to place it.'
+                                     : 'Added. Pick one more for a parlay.');
+    }
+  });
+}
+
 /* ---------- 12c. First-visit identity ---------- */
 function renderIdentityGate() {
   const gate = document.getElementById('identityGate');
@@ -2498,6 +2930,22 @@ function boot() {
   safely('identity', renderIdentityGate);
   safely('outbox', () => { renderSyncChip(); startOutboxRetry(); });
   safely('header avatar', renderHeaderAvatar);
+  safely('real board', () => {
+    RealBoard.load().then(() => {
+      const real = RealBoard.toMarkets();
+      if (real.length) {
+        /* keep non-NFL demo markets, replace the NFL board with real numbers */
+        markets = real.concat(markets.filter(m => m.category !== 'nfl'));
+        renderMarkets(activeFilter());
+        renderHomeGames();
+        renderTrending();
+        renderFeatured();     // cards are composed from the board, so rebuild them
+        renderSlip();
+      }
+    }).catch(e => console.warn('[VIG] real board unavailable:', e && e.message));
+  });
+  safely('home games', renderHomeGames);
+  safely('bet tracking', startBetTracking);
   safely('golf event', async () => {
     await GolfEvent.load();
     renderGolfEvent();
@@ -3092,9 +3540,17 @@ function placeGolfBet(sel, stake, total) {
   if (s.betsLeft <= 0) { showToast(`Weekly limit of ${WEEKLY_BET_LIMIT} bets reached.`); return; }
   if (!(stake >= 1) || stake > week.bankroll) { showToast('Invalid virtual stake.'); return; }
 
+  /* Snapshot what the market believed right now — the one piece of CLV
+     that cannot be reconstructed later. */
+  const fieldPrices = GolfEvent.selections().map(x => x.americanOdds);
+  const myIndex = GolfEvent.selections().findIndex(x => x.selectionId === sel.selectionId);
+
   week.tickets.unshift({
     id: `VIG-G-${Date.now().toString(36).toUpperCase()}`,
     kind: 'golf',
+    fairProb: fairProbability(fieldPrices, myIndex),
+    fairMethod: DEVIG_METHOD,
+    bookPrices: { book: 'vig-sim', prices: fieldPrices },
     eventId: GolfEvent.data.eventId,
     marketId: GolfEvent.market().marketId,
     selectionId: sel.selectionId,
@@ -3526,13 +3982,21 @@ const Cloud = {
   },
 
   /* ---- bets ---- */
+  /* THROWS on failure rather than returning []. An empty array and a failed
+     read are completely different things: syncFromCloud() assigns the result
+     straight to week.tickets, so swallowing the error here would have wiped
+     a user's entire ticket list the moment the server hiccuped. */
   async myBets(weekKey) {
     if (!this.signedIn()) return [];
     const { data, error } = await this.client
       .from('bets').select('*')
       .eq('user_id', this.userId()).eq('week_key', weekKey)
       .order('placed_at', { ascending: false });
-    if (error) { console.warn('[VIG] bets read failed:', error.message); return []; }
+    if (error) {
+      this.reachable = false;
+      throw new Error(error.message || 'bets read failed');
+    }
+    this.reachable = true;
     return (data || []).map(rowToTicket);
   },
 
@@ -3551,7 +4015,10 @@ const Cloud = {
       stake: ticket.stake,
       odds: ticket.odds,
       potential_return: ticket.returnAmount,
-      legs: ticket.legs || null
+      legs: ticket.legs || null,
+      fair_prob: (typeof ticket.fairProb === 'number') ? ticket.fairProb : null,
+      fair_method: ticket.fairMethod || null,
+      book_prices: ticket.bookPrices || null
     };
     const { data, error } = await this.client.from('bets').insert(row).select().single();
     if (error) throw error;
@@ -3709,6 +4176,10 @@ function rowToTicket(r) {
     odds: Number(r.odds),
     returnAmount: Number(r.potential_return),
     settledAt: r.settled_at || undefined,
+    fairProb: (r.fair_prob === null || r.fair_prob === undefined) ? null : Number(r.fair_prob),
+    fairMethod: r.fair_method || null,
+    bookPrices: r.book_prices || null,
+    closeProb: (r.close_prob === null || r.close_prob === undefined) ? null : Number(r.close_prob),
     legs: r.legs || [{ title: r.title, odds: Number(r.odds), gameId: null }],
     remote: true
   };
@@ -3743,7 +4214,13 @@ function needsProfile() {
 }
 /* Signed in, but the database did not answer. Almost always a paused
    free-tier project. */
-function cloudUnreachable() { return Cloud.enabled() && Cloud.signedIn() && Cloud.profileUnknown; }
+function cloudUnreachable() {
+  /* Two things can tell us the server is down: the profile read failing at
+     boot, or any later call failing. Previously only the first was checked,
+     so a failed poll left the UI claiming everything was fine. */
+  return Cloud.enabled() && Cloud.signedIn()
+    && (Cloud.profileUnknown || Cloud.reachable === false);
+}
 
 /* Returns true if the action may proceed. Otherwise opens the sign-in
    sheet with a reason, so the ask never feels arbitrary. */
@@ -4009,11 +4486,19 @@ function wireMagicLink() {
 async function syncFromCloud() {
   if (!Cloud.enabled() || !Cloud.signedIn()) return;
   try {
-    if (cloudUnreachable()) return;      // keep whatever is on the device
     /* Flush first. Pulling the remote list before sending queued bets is
        what used to make an offline bet disappear. */
     await flushOutbox();
-    const remote = await Cloud.myBets(week.key);
+    let remote;
+    try {
+      remote = await Cloud.myBets(week.key);
+    } catch (e) {
+      /* keep whatever is on the device — never trade real tickets for an
+         empty list because one request failed */
+      console.warn('[VIG] ticket read failed, keeping local:', e && e.message);
+      renderBetsLive();
+      return;
+    }
     const pending = Outbox.all().map(x => x.ticket);
     const remoteIds = new Set(remote.map(t => t.id));
     week.tickets = remote.concat(pending.filter(t => !remoteIds.has(t.id)));
@@ -4194,14 +4679,17 @@ function renderAccountChip() {
 
 /* Debug handle. Open the console and poke at VIG.Fantasy.profile(...)
    or VIG.DataSource.mode while working on this. */
-window.VIG = { Fantasy, Store, DataSource, weekStats, SCORING, METRIC_DEFS,
+window.VIG = {
+               RealBoard, NFL_NAMES, realMove, addButton, buildFeatured,
+               refreshTickets, renderBetsLive, startBetTracking, openTickets, betLabel, get selected() { return selected; }, Fantasy, Store, DataSource, weekStats, SCORING, METRIC_DEFS,
                get bootErrors() { return bootErrors; }, tzParts, weekKeyFor, nextResetAt, RESET_TZ, RESET_HOUR,
                GolfEvent, Admin, settleGolfEvent, golfTickets, getIdentity, saveIdentity, archiveWeek, blankWeek,
                Cloud, derivedBankroll, requireAccount,
-               decimalOdds, americanFromDecimal, impliedProb, round2, fmtOdds, combinedAmerican, devigPair, needsAccount, needsProfile, openAuth,
+               decimalOdds, americanFromDecimal, impliedProb, round2, fmtOdds, combinedAmerican, devigPair,
+               devigProportional, devigPower, fairProbability, DEVIG_METHOD, round4, needsAccount, needsProfile, openAuth,
                refreshLeaderboard, syncFromCloud, AUTH_GATED_VIEWS, cloudUnreachable,
                get authMode2() { return authMode2; }, set authMode2(v) { authMode2 = v; },
-               Outbox, flushOutbox, renderSyncChip, WEEKLY_BET_LIMIT, WEEKLY_BANKROLL, week, renderProfileCard, avatarOf, AVATAR_COLORS, renderHeaderAvatar,
+               Outbox, flushOutbox, renderSyncChip, renderBets, activeBetFilter, WEEKLY_BET_LIMIT, WEEKLY_BANKROLL, week, renderProfileCard, avatarOf, AVATAR_COLORS, renderHeaderAvatar, renderHomeGames,
                get cloudBoard() { return cloudBoard; },
                updateLifetime, AUTO_ROLLOVER, renderGolfEvent, renderAdmin,
                ROSTER_SLOTS, DRAFT_ROUNDS, assignSlot, ordinal, buildDraftPool,

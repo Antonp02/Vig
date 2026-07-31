@@ -83,6 +83,7 @@
     </div>
 
     <div class="dashboard-grid">
+      <section class="panel span-2"><div class="panel-head"><div><span class="eyebrow">UPCOMING</span><h2>Games on the board</h2></div><button class="text-btn" data-jump="parlay">Full board</button></div><div id="homeGames" class="home-games"></div></section>
       <section class="panel span-2"><div class="panel-head"><div><span class="eyebrow">TRENDING</span><h2>Popular mock picks</h2></div><button class="text-btn" data-jump="parlay">See all</button></div><div id="trendingPicks" class="pick-list"></div></section>
       <section class="panel"><div class="panel-head"><div><span class="eyebrow">RECENT ACTIVITY</span><h2>Your latest tickets</h2></div></div><div id="recentBets" class="compact-list"></div><button class="full secondary" data-jump="bets">Open My Bets</button></section>
       <section class="panel"><div class="panel-head"><div><span class="eyebrow">FANTASY DRAFT LAB</span><h2>Next mock</h2></div></div><div class="draft-preview"><div><span>12-team PPR</span><strong>Pick 1.07</strong><small>Snake · 5 rounds</small></div><div class="draft-clock">0:30</div></div><button class="full secondary" data-jump="fantasy">Enter draft room</button></section>
@@ -95,7 +96,7 @@
     <section class="panel featured-parlays"><div class="panel-head"><div><span class="eyebrow">FEATURED BUILDS</span><h2>Popular parlays for upcoming games</h2></div><span class="updated">Simulated examples</span></div><div id="featuredParlays" class="featured-parlay-grid"></div></section>
     <div class="builder-grid">
       <section class="panel"><div class="filter-row"><button class="filter active" data-filter="all">All</button><button class="filter" data-filter="nfl">NFL</button><button class="filter" data-filter="golf">Golf</button><button class="filter" data-filter="tennis">Tennis</button><button class="filter" data-filter="soccer">Soccer</button><button class="filter" data-filter="fantasy">Fantasy</button></div><div id="marketList" class="market-list"></div></section>
-      <aside class="panel ticket-card"><div class="panel-head"><div><span class="eyebrow">YOUR SLIP</span><h2>Mock parlay</h2></div><button id="clearSlip" class="text-btn">Clear</button></div><div id="selectedLegs" class="selected-legs empty-state">Choose at least two picks to build a parlay.</div><div class="ticket-summary"><label>Virtual stake<input id="stakeInput" type="number" min="1" max="1000" value="25" /></label><div><span>Parlay odds</span><strong id="combinedOdds">—</strong></div><div><span>Potential return</span><strong id="potentialReturn">$0.00</strong></div></div><p class="slip-error" id="slipError" hidden></p>
+      <aside class="panel ticket-card"><div class="panel-head"><div><span class="eyebrow">YOUR SLIP</span><h2 id="slipKind">Bet slip</h2></div><button id="clearSlip" class="text-btn">Clear</button></div><div id="selectedLegs" class="selected-legs empty-state">Tap a price to start. One pick is a straight bet, two or more builds a parlay.</div><div class="ticket-summary"><label>Virtual stake<input id="stakeInput" type="number" min="1" max="1000" value="25" /></label><div><span id="slipOddsLabel">Odds</span><strong id="combinedOdds">—</strong></div><div><span>Potential return</span><strong id="potentialReturn">$0.00</strong></div></div><p class="slip-error" id="slipError" hidden></p>
 <button id="placeMockBet" class="full primary" disabled>Place mock ticket</button><p class="disclaimer">Entertainment simulation only. No real-money wagering, deposits, or cash prizes.</p></aside>
     </div>
   </section>
@@ -118,7 +119,8 @@
 
   <section id="bets" class="view">
     <div class="section-title"><div><span class="eyebrow">BET TRACKER</span><h1>My Bets</h1><p>This week only. Tickets archive every Tuesday when the bankroll resets.</p><div class="bet-actions"><button id="settleBets" class="secondary">Settle open tickets</button><button id="resetWeek" class="text-btn">Restart this week</button></div></div><div class="summary-strip"><div><span>Risked</span><strong id="totalRisked">$0</strong></div><div><span>At risk</span><strong id="atRisk">$0</strong></div><div><span>Realized P/L</span><strong id="netProfit">$0</strong></div><div><span>Bets used</span><strong id="betsUsed">0/25</strong></div></div></div>
-    <div class="filter-row bet-filters"><button class="bet-filter active" data-status="all">All</button><button class="bet-filter" data-status="open">Open</button><button class="bet-filter" data-status="won">Won</button><button class="bet-filter" data-status="lost">Lost</button></div>
+    <div class="bets-live"><span class="live-dot" id="betsLiveDot"></span><small id="betsUpdated">Not synced</small><button class="text-btn" id="betsRefresh">Refresh</button></div>
+    <div class="filter-row bet-filters"><button class="bet-filter active" data-status="all">All</button><button class="bet-filter" data-status="open">Open</button><button class="bet-filter" data-status="won">Won</button><button class="bet-filter" data-status="lost">Lost</button><button class="bet-filter" data-status="push">Push</button></div>
     <section class="panel"><div id="betHistory" class="bet-history"></div></section>
   </section>
 

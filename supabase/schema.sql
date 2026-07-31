@@ -47,9 +47,24 @@ create table if not exists public.bets (
   status           text not null default 'open'
                      check (status in ('open','won','lost','push','void')),
   legs             jsonb,
+  -- Closing Line Value needs to know what the market believed AT THE MOMENT
+  -- the bet was placed. That is not recoverable later — the instant passes
+  -- and no query brings it back. So it is written down on insert, even while
+  -- the odds are still simulated, and compared against the closing line once
+  -- the snapshot archive exists (v1.6).
+  fair_prob        numeric(6,4) check (fair_prob is null or (fair_prob > 0 and fair_prob < 1)),
+  fair_method      text check (fair_method in ('proportional','power','shin')),
+  book_prices      jsonb,
+  close_prob       numeric(6,4) check (close_prob is null or (close_prob > 0 and close_prob < 1)),
   placed_at        timestamptz not null default now(),
   settled_at       timestamptz
 );
+
+-- Safe to re-run if you already applied an earlier version of this file:
+alter table public.bets add column if not exists fair_prob   numeric(6,4);
+alter table public.bets add column if not exists fair_method text;
+alter table public.bets add column if not exists book_prices jsonb;
+alter table public.bets add column if not exists close_prob  numeric(6,4);
 create index if not exists bets_user_week on public.bets (user_id, week_key);
 create index if not exists bets_week      on public.bets (week_key);
 create index if not exists bets_event     on public.bets (event_id) where event_id is not null;
@@ -107,7 +122,8 @@ drop policy if exists bets_admin_write on public.bets;
 drop policy if exists bets_admin_read  on public.bets;
 create policy bets_read        on public.bets for select to authenticated using (auth.uid() = user_id);
 create policy bets_insert      on public.bets for insert to authenticated
-  with check (auth.uid() = user_id and status = 'open' and settled_at is null);
+  with check (auth.uid() = user_id and status = 'open' and settled_at is null
+              and close_prob is null);   -- the closing line is not yours to set
 create policy bets_admin_read  on public.bets for select to authenticated using (public.is_admin());
 create policy bets_admin_write on public.bets for update to authenticated using (public.is_admin());
 
@@ -145,7 +161,9 @@ returns table (
   profit       numeric,
   roi          numeric,
   hit_rate     integer,
-  biggest_win  numeric
+  biggest_win  numeric,
+  clv          numeric,      -- mean (close - fair) in percentage points
+  clv_bets     integer       -- how many bets that average is drawn from
 ) language sql stable security definer set search_path = public as $$
   select
     p.id,
@@ -173,7 +191,10 @@ returns table (
       then round(100.0 * count(b.id) filter (where b.status = 'won')
                  / count(b.id) filter (where b.status in ('won','lost')))::int
       else 0 end,
-    coalesce(max(b.potential_return - b.stake) filter (where b.status = 'won'), 0)
+    coalesce(max(b.potential_return - b.stake) filter (where b.status = 'won'), 0),
+    round(avg(100 * (b.close_prob - b.fair_prob))
+          filter (where b.close_prob is not null and b.fair_prob is not null), 2),
+    coalesce(count(b.id) filter (where b.close_prob is not null and b.fair_prob is not null), 0)::int
   from public.profiles p
   left join public.bets b on b.user_id = p.id and b.week_key = p_week
   group by p.id, p.display_name
@@ -194,7 +215,10 @@ returns table (
   profit       numeric,
   roi          numeric,
   biggest_win  numeric,
-  weeks_played integer
+  weeks_played integer,
+  clv          numeric,
+  clv_bets     integer,
+  beat_close   integer      -- how many times you took a better number than the close
 ) language sql stable security definer set search_path = public as $$
   select
     p.id, p.display_name,
@@ -212,7 +236,11 @@ returns table (
            ) / sum(b.stake) filter (where b.status in ('won','lost')), 1)
       else null end,
     coalesce(max(b.potential_return - b.stake) filter (where b.status = 'won'), 0),
-    coalesce(count(distinct b.week_key), 0)::int
+    coalesce(count(distinct b.week_key), 0)::int,
+    round(avg(100 * (b.close_prob - b.fair_prob))
+          filter (where b.close_prob is not null and b.fair_prob is not null), 2),
+    coalesce(count(b.id) filter (where b.close_prob is not null and b.fair_prob is not null), 0)::int,
+    coalesce(count(b.id) filter (where b.close_prob > b.fair_prob), 0)::int
   from public.profiles p
   left join public.bets b on b.user_id = p.id
   group by p.id, p.display_name;
@@ -225,3 +253,25 @@ returns integer language sql stable security definer set search_path = public as
   select count(*)::int from public.profiles;
 $$;
 grant execute on function public.user_count() to authenticated;
+
+
+-- ============================================================
+-- Closing line stamp (v1.6 will call this from the cron)
+-- Admin only. Sets close_prob on every open bet for an event so CLV
+-- can be computed. Idempotent: only fills rows that are still null.
+-- ============================================================
+create or replace function public.stamp_close(p_event text, p_selection text, p_close numeric)
+returns integer language plpgsql security definer set search_path = public as $$
+declare n integer;
+begin
+  if not public.is_admin() then raise exception 'admin only'; end if;
+  update public.bets
+     set close_prob = p_close
+   where event_id = p_event
+     and selection_id = p_selection
+     and close_prob is null;
+  get diagnostics n = row_count;
+  return n;
+end;
+$$;
+grant execute on function public.stamp_close(text, text, numeric) to authenticated;

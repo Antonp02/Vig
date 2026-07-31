@@ -14,7 +14,7 @@
      icons, manifest, data-> cache first, refreshed in the background
      /api/*               -> never cached, it is live odds
 --------------------------------------------------------------- */
-const VERSION = 'v1.5.1';
+const VERSION = 'v1.5.6';
 const SHELL = `vig-shell-${VERSION}`;
 const ASSETS = `vig-assets-${VERSION}`;
 
@@ -22,7 +22,7 @@ const ASSETS = `vig-assets-${VERSION}`;
 const PRECACHE = [
   './', './index.html', './app.js', './styles.css', './config.js',
   './manifest.webmanifest',
-  './data/fantasy-2025.json',
+  './data/fantasy-2025.json', './data/golf-event.json', './data/nfl-2026-week1.json',
   './icons/icon-192.png', './icons/icon-512.png',
   './icons/apple-touch-icon.png', './icons/favicon-32.png'
 ];

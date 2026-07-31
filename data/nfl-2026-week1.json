@@ -1,0 +1,309 @@
+{
+  "season": 2026,
+  "week": 1,
+  "source": "ESPN NFL odds board, captured manually",
+  "capturedAt": "2026-07-31T18:00:00-04:00",
+  "note": "Open is the opening number, current is where the market sits now. The gap between them is real line movement.",
+  "games": [
+    {
+      "gameId": "ne-sea",
+      "away": "NE",
+      "home": "SEA",
+      "kickoff": "2026-09-09T20:20:00-04:00",
+      "open": {
+        "spread": 3.5,
+        "spreadPrice": -110,
+        "total": 44.5,
+        "totalPrice": -110
+      },
+      "current": {
+        "spread": 3.5,
+        "spreadPrice": -110,
+        "total": 44.5,
+        "totalPrice": -110,
+        "mlAway": 164,
+        "mlHome": -198
+      }
+    },
+    {
+      "gameId": "sf-la",
+      "away": "SF",
+      "home": "LA",
+      "kickoff": "2026-09-10T20:35:00-04:00",
+      "open": {
+        "spread": 2.5,
+        "spreadPrice": -120,
+        "total": 48.5,
+        "totalPrice": -110
+      },
+      "current": {
+        "spread": 3.5,
+        "spreadPrice": -115,
+        "total": 48.5,
+        "totalPrice": -110,
+        "mlAway": 150,
+        "mlHome": -180
+      }
+    },
+    {
+      "gameId": "atl-pit",
+      "away": "ATL",
+      "home": "PIT",
+      "kickoff": "2026-09-13T13:00:00-04:00",
+      "open": {
+        "spread": 3.0,
+        "spreadPrice": -120,
+        "total": 42.5,
+        "totalPrice": -110
+      },
+      "current": {
+        "spread": 3.0,
+        "spreadPrice": 100,
+        "total": 41.5,
+        "totalPrice": -110,
+        "mlAway": 145,
+        "mlHome": -175
+      }
+    },
+    {
+      "gameId": "bal-ind",
+      "away": "BAL",
+      "home": "IND",
+      "kickoff": "2026-09-13T13:00:00-04:00",
+      "open": {
+        "spread": -3.5,
+        "spreadPrice": -110,
+        "total": 49.5,
+        "totalPrice": -110
+      },
+      "current": {
+        "spread": -3.5,
+        "spreadPrice": -110,
+        "total": 49.5,
+        "totalPrice": -110,
+        "mlAway": -185,
+        "mlHome": 154
+      }
+    },
+    {
+      "gameId": "buf-hou",
+      "away": "BUF",
+      "home": "HOU",
+      "kickoff": "2026-09-13T13:00:00-04:00",
+      "open": {
+        "spread": -1.5,
+        "spreadPrice": 102,
+        "total": 45.5,
+        "totalPrice": -115
+      },
+      "current": {
+        "spread": -1.5,
+        "spreadPrice": -108,
+        "total": 44.5,
+        "totalPrice": -110,
+        "mlAway": -120,
+        "mlHome": 100
+      }
+    },
+    {
+      "gameId": "chi-car",
+      "away": "CHI",
+      "home": "CAR",
+      "kickoff": "2026-09-13T13:00:00-04:00",
+      "open": {
+        "spread": -2.5,
+        "spreadPrice": -110,
+        "total": 44.5,
+        "totalPrice": -110
+      },
+      "current": {
+        "spread": -2.5,
+        "spreadPrice": -118,
+        "total": 44.5,
+        "totalPrice": -110,
+        "mlAway": -148,
+        "mlHome": 124
+      }
+    },
+    {
+      "gameId": "cle-jax",
+      "away": "CLE",
+      "home": "JAX",
+      "kickoff": "2026-09-13T13:00:00-04:00",
+      "open": {
+        "spread": 7.0,
+        "spreadPrice": -110,
+        "total": 40.5,
+        "totalPrice": -110
+      },
+      "current": {
+        "spread": 7.5,
+        "spreadPrice": -110,
+        "total": 40.5,
+        "totalPrice": -110,
+        "mlAway": 310,
+        "mlHome": -395
+      }
+    },
+    {
+      "gameId": "no-det",
+      "away": "NO",
+      "home": "DET",
+      "kickoff": "2026-09-13T13:00:00-04:00",
+      "open": {
+        "spread": 7.0,
+        "spreadPrice": -110,
+        "total": 48.5,
+        "totalPrice": -110
+      },
+      "current": {
+        "spread": 7.0,
+        "spreadPrice": -110,
+        "total": 49.5,
+        "totalPrice": -110,
+        "mlAway": 250,
+        "mlHome": -310
+      }
+    },
+    {
+      "gameId": "nyj-ten",
+      "away": "NYJ",
+      "home": "TEN",
+      "kickoff": "2026-09-13T13:00:00-04:00",
+      "open": {
+        "spread": 3.0,
+        "spreadPrice": -115,
+        "total": 39.5,
+        "totalPrice": -110
+      },
+      "current": {
+        "spread": 3.0,
+        "spreadPrice": -120,
+        "total": 38.5,
+        "totalPrice": -110,
+        "mlAway": 130,
+        "mlHome": -155
+      }
+    },
+    {
+      "gameId": "tb-cin",
+      "away": "TB",
+      "home": "CIN",
+      "kickoff": "2026-09-13T13:00:00-04:00",
+      "open": {
+        "spread": 3.5,
+        "spreadPrice": -110,
+        "total": 50.5,
+        "totalPrice": -115
+      },
+      "current": {
+        "spread": 3.5,
+        "spreadPrice": -110,
+        "total": 52.5,
+        "totalPrice": -110,
+        "mlAway": 160,
+        "mlHome": -192
+      }
+    },
+    {
+      "gameId": "ari-lac",
+      "away": "ARI",
+      "home": "LAC",
+      "kickoff": "2026-09-13T16:25:00-04:00",
+      "open": {
+        "spread": 11.5,
+        "spreadPrice": -110,
+        "total": 45.5,
+        "totalPrice": -110
+      },
+      "current": {
+        "spread": 11.5,
+        "spreadPrice": -110,
+        "total": 46.5,
+        "totalPrice": -110,
+        "mlAway": 455,
+        "mlHome": -625
+      }
+    },
+    {
+      "gameId": "gb-min",
+      "away": "GB",
+      "home": "MIN",
+      "kickoff": "2026-09-13T16:25:00-04:00",
+      "open": {
+        "spread": -1.5,
+        "spreadPrice": -110,
+        "total": 44.5,
+        "totalPrice": -110
+      },
+      "current": {
+        "spread": -1.5,
+        "spreadPrice": -110,
+        "total": 45.5,
+        "totalPrice": -110,
+        "mlAway": -115,
+        "mlHome": -105
+      }
+    },
+    {
+      "gameId": "mia-lv",
+      "away": "MIA",
+      "home": "LV",
+      "kickoff": "2026-09-13T16:25:00-04:00",
+      "open": {
+        "spread": 3.0,
+        "spreadPrice": -120,
+        "total": 41.5,
+        "totalPrice": -110
+      },
+      "current": {
+        "spread": 3.5,
+        "spreadPrice": -110,
+        "total": 40.5,
+        "totalPrice": -110,
+        "mlAway": 170,
+        "mlHome": -205
+      }
+    },
+    {
+      "gameId": "was-phi",
+      "away": "WAS",
+      "home": "PHI",
+      "kickoff": "2026-09-13T16:25:00-04:00",
+      "open": {
+        "spread": 5.5,
+        "spreadPrice": -110,
+        "total": 46.5,
+        "totalPrice": -110
+      },
+      "current": {
+        "spread": 4.5,
+        "spreadPrice": -110,
+        "total": 47.5,
+        "totalPrice": -110,
+        "mlAway": 180,
+        "mlHome": -218
+      }
+    },
+    {
+      "gameId": "dal-nyg",
+      "away": "DAL",
+      "home": "NYG",
+      "kickoff": "2026-09-13T20:20:00-04:00",
+      "open": {
+        "spread": -2.5,
+        "spreadPrice": -105,
+        "total": 48.5,
+        "totalPrice": -110
+      },
+      "current": {
+        "spread": -2.5,
+        "spreadPrice": -115,
+        "total": 47.5,
+        "totalPrice": -110,
+        "mlAway": -148,
+        "mlHome": 124
+      }
+    }
+  ]
+}

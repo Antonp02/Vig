@@ -602,3 +602,61 @@ button,select,input,a{touch-action:manipulation}
 }
 .slip-error{margin:0 0 10px;color:var(--red);font-size:12px}
 .slip-error[hidden]{display:none}
+
+/* ===================== v1.5.2 — home games + CLV ===================== */
+.home-games{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:16px}
+.game-card{border:1px solid var(--line);border-radius:12px;padding:11px;background:rgba(255,255,255,.018)}
+.game-when{color:var(--muted);font-size:10px;letter-spacing:.06em;margin-bottom:9px}
+.game-sides{display:grid;gap:5px}
+.game-side{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  border:1px solid var(--line);background:transparent;color:var(--text);
+  padding:9px 10px;border-radius:9px;font-size:12px;min-height:40px;width:100%}
+.game-side:hover{background:var(--panel2);border-color:var(--accent-dark)}
+.game-side span{font-weight:800;letter-spacing:.02em}
+.game-side.flat{opacity:.5}
+.clv{font-style:normal;font-size:10px;font-weight:800;margin-left:5px}
+.clv.good{color:#4ad991}
+.clv.bad{color:var(--red)}
+@media(max-width:900px){.home-games{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:620px){.home-games{grid-template-columns:1fr}}
+.game-side.on{border-color:var(--accent);background:var(--accent-dark);color:var(--accent-soft)}
+.mv{font-style:normal;font-weight:800;font-size:10px;color:var(--accent-soft)}
+.mv.good{color:#4ad991}
+.mv.bad{color:var(--gold)}
+.game-line{margin-top:8px;padding-top:8px;border-top:1px solid var(--line);
+  color:var(--muted);font-size:10px;letter-spacing:.03em}
+
+/* ===================== v1.5.5 — parlay building ===================== */
+/* A distinct violet for "you are building a parlay", so it never reads as
+   the same action as placing a straight bet in brand blue. */
+:root{--parlay:#6c5ce7;--parlay-dark:#2a2359;--parlay-soft:#b3a9ff}
+.add-btn.to-parlay{background:var(--parlay-dark);border-color:#4a3fa8;color:var(--parlay-soft);font-weight:800}
+.add-btn.to-parlay:hover{background:var(--parlay);border-color:var(--parlay);color:#0b0a1f}
+.add-btn.added{background:var(--accent-dark);border-color:var(--accent);color:var(--accent-soft)}
+.add-btn.added:hover{background:rgba(255,125,142,.14);border-color:var(--red);color:var(--red)}
+.game-side.to-parlay{border-color:#4a3fa8}
+.game-side.to-parlay:hover{background:var(--parlay-dark);border-color:var(--parlay);color:var(--parlay-soft)}
+.featured-actions{display:flex;gap:7px;flex-wrap:wrap}
+.featured-actions .add-btn{padding:8px 11px;font-size:11px}
+/* the x is the other way out of a leg, so make it a real target */
+.remove-leg{min-width:34px;min-height:34px;border-radius:8px;font-size:17px;line-height:1}
+.remove-leg:hover{background:rgba(255,125,142,.12);color:var(--red)}
+.selected-leg{align-items:center}
+.slip-kind-chip{display:inline-block;margin-left:8px;font-size:10px;font-weight:800;
+  padding:3px 8px;border-radius:999px;background:var(--parlay-dark);color:var(--parlay-soft)}
+@media(max-width:700px){
+  .featured-actions{width:100%}
+  .featured-actions .add-btn{flex:1 1 auto;min-height:44px}
+  .remove-leg{min-width:44px;min-height:44px}
+}
+
+/* ===================== v1.5.6 — live bet tracking ===================== */
+.bets-live{display:flex;align-items:center;gap:9px;margin-bottom:12px}
+.bets-live small{color:var(--muted);font-size:11px}
+.bets-live .text-btn{margin-left:auto;font-size:11px;padding:6px 10px}
+.live-dot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:0 0 auto}
+.live-dot.on{background:#4ad991;box-shadow:0 0 0 4px rgba(74,217,145,.15)}
+.live-dot.idle{background:var(--accent);box-shadow:0 0 0 4px rgba(40,117,203,.12)}
+.live-dot.warn{background:var(--gold);box-shadow:0 0 0 4px rgba(232,189,105,.15)}
+.live-dot.off{background:var(--line)}
+@media(max-width:700px){.bets-live .text-btn{min-height:38px}}
