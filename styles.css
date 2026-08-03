@@ -724,3 +724,9 @@ button,select,input,a{touch-action:manipulation}
   .lb-head,.lb-row{grid-template-columns:40px 1fr 52px}
   .lb-r{display:none}
 }
+.settle-pending{margin:0 0 18px;padding:12px 14px;border-left:3px solid var(--gold);
+  background:rgba(232,189,105,.09);color:var(--text);font-size:12px;line-height:1.6;border-radius:0 10px 10px 0}
+.settle-pending strong{display:block;margin-bottom:3px;color:var(--gold)}
+.settle-pending code{background:var(--panel2);padding:1px 5px;border-radius:4px;font-size:11px}
+.golf-locked.win{color:#4ad991;font-weight:900}
+.status.open{font-size:9px}

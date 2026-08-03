@@ -28,7 +28,7 @@ so the 7-day inactivity pause stops being a risk.
 
 **Requires:** moving to Vercel. GitHub Pages runs no serverless functions.
 
-### v1.7 — Live odds
+### v1.7 — Live odds (The Odds API) + fantasy data (Sleeper)
 
 **Will add**
 - The Odds API on the $30 tier, wired through the existing `api/odds.js` proxy.
@@ -42,6 +42,28 @@ only the `h2h` shape, and golf is `outrights` with a different payload.
 
 **Will NOT fix:** golf *results*. The Odds API sells prices, not outcomes, so
 settling a tournament stays manual until a results source is added.
+
+**Also wire up Sleeper while you are in here.** It is a *second, separate* API —
+free, public, no key, no rate limit worth worrying about — and it carries the
+things The Odds API does not: **weekly projections, injury status, and player
+metadata**. Doing both in one version makes sense because they are the same
+shape of work (fetch, normalise, cache) and because the fantasy tab is the half
+people actually use.
+
+```
+https://api.sleeper.app/v1/players/nfl          all players + injury_status
+https://api.sleeper.app/v1/state/nfl            current season and week
+```
+
+Notes for when it happens:
+- The player dump is large (several MB) and changes slowly — **fetch it daily,
+  not per request**, and cache it the way `fantasy-2025.json` is cached today.
+- Sleeper ids are its own; match on name using the existing `matchKey()`, which
+  already handles suffixes and D/ST nicknames.
+- Projections are per week, so the shape maps onto the current
+  `projections.rows` and would replace the hand-pasted ESPN elite file.
+- This removes the last manual step in the fantasy tab. Everything else there is
+  already automatic from nflverse.
 
 ### v1.8 candidate — automate the fantasy data
 
@@ -63,7 +85,8 @@ automated.
 Three ways to close it:
 
 1. **Sleeper's API** — free, public, no key, carries projections and injury
-   status. The actual fix, and independent of the odds work.
+   status. The actual fix. Now pencilled into v1.7 alongside the odds work,
+   since it is the same shape of job.
 2. **Compute projections from nflverse** — fully automatic and more honest, since
    the method would be inspectable rather than a vendor's black box. Loses
    pre-season numbers for rookies with no prior data.
@@ -82,6 +105,44 @@ Three ways to close it:
   real reason rather than a network blip would loop indefinitely.
 - **Custom SMTP** so magic links reach people outside the Supabase org. Password
   signup works today, which is why this is not urgent.
+
+---
+
+## v1.5.10 — Winning tickets never paid
+
+**Fixed**
+- **A winning bet showed as a winner on the board but never settled.** v1.5.9
+  shipped the golf event with `winnerSelectionId` already set, which made it
+  *display* as final without ever grading a single ticket. The board read "WON"
+  next to The Field, the ticket in My Bets stayed `open`, and the bankroll never
+  moved. Reported from the live site with a $100 stake at +250 — $350 owed and
+  nothing credited.
+
+  Two different fixes, because there are two different sources of truth:
+
+  - **Local mode** — the event file is the only truth, so the app now settles
+    from `winnerSelectionId` on load. Idempotent, so a reload cannot pay twice.
+  - **Cloud mode** — the database is the truth, and users deliberately have **no
+    update policy on their own bets**; without that, anyone could set
+    `status = 'won'` and pay themselves. So an admin still settles, and everyone
+    else now sees an explicit **"awaiting settlement"** state with the amount
+    owed, rather than an open ticket that looks forgotten.
+
+- The board label was the misleading part: it read **WON**, which sounds like
+  *your bet* won. It now reads **WINNER**, which is a fact about the selection.
+- Tickets on a finished event read **"awaiting settlement"** instead of "open".
+
+**Note for the admin**
+`?admin=1` → choose the winner → Settle. That grades every open ticket on the
+event **for all users at once**, in the database. It is idempotent: clicking it
+twice pays nobody twice.
+
+**Notes**
+- Not a hosting issue. Settlement has nothing to do with Vercel — it is the same
+  code path locally and in the cloud, only the source of truth differs.
+- 15 new assertions covering both paths, including that cloud mode refuses to
+  self-settle and that a second settle pays nothing more.
+- Service worker cache to `v1.5.10`.
 
 ---
 

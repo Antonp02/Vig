@@ -1016,7 +1016,8 @@ function renderBets(status = 'all') {
   const data = week.tickets.filter(t => status === 'all' || t.status === status);
   document.getElementById('betHistory').innerHTML = data.length ? data.map(t =>
     `<article class="bet-card">
-      <div class="bet-card-head"><span class="status ${t.status}">${t.status}</span><small>${t.id} · ${t.date}</small></div>
+      <div class="bet-card-head"><span class="status ${t.status}">${
+        t.status === 'open' && pendingSettlement().some(x => x.id === t.id) ? 'awaiting settlement' : t.status}</span><small>${t.id} · ${t.date}</small></div>
       <h3>${betLabel(t)} <span class="odds">${fmtOdds(t.odds)}</span></h3>
       <ol class="bet-legs">${t.legs.map(l => `<li>${l.title}${validOdds(l.odds) ? ` <span class="odds">${fmtOdds(l.odds)}</span>` : ''}</li>`).join('')}</ol>
       <div class="bet-card-foot">
@@ -2967,6 +2968,7 @@ function boot() {
   safely('bet tracking', startBetTracking);
   safely('golf event', async () => {
     await GolfEvent.load();
+    autoSettleFromEventData();
     renderGolfEvent();
     renderAdmin();
   });
@@ -3460,6 +3462,42 @@ function golfLeaderboardHtml() {
   </section>`;
 }
 
+/* BUG (v1.5.9): shipping the event with a winner made it *display* as settled
+   without settling anyone's tickets. The board read "WON" next to The Field
+   while the ticket stayed open and the bankroll never moved.
+
+   Local mode: the event file is the only source of truth, so honour it and
+   settle. Cloud mode: the database is the truth and RLS gives users no update
+   on their own bets — by design, or anyone could pay themselves — so an admin
+   must settle, and everyone else sees "awaiting settlement" until they do. */
+function autoSettleFromEventData() {
+  if (!GolfEvent.data) return 0;
+  const declared = GolfEvent.data.winnerSelectionId;
+  if (!declared || !GolfEvent.isFinal()) return 0;
+  const open = golfTickets().filter(t => t.status === 'open'
+    && t.eventId === GolfEvent.data.eventId);
+  if (!open.length) return 0;
+
+  if (Cloud.enabled() && Cloud.signedIn()) return 0;   // the server decides
+
+  const r = settleGolfEvent(declared);
+  if (r.settled) {
+    updateDashboard();
+    renderBets(activeBetFilter());
+    renderCompetition();
+    showToast(`Event settled — ${r.settled} ticket${r.settled === 1 ? '' : 's'}, ${money(r.paid)} returned.`);
+  }
+  return r.settled;
+}
+
+/* Tickets on a finished event that the server has not graded yet. */
+function pendingSettlement() {
+  if (!(Cloud.enabled() && Cloud.signedIn()) || !GolfEvent.data) return [];
+  if (!GolfEvent.isFinal()) return [];
+  return golfTickets().filter(t => t.status === 'open'
+    && t.eventId === GolfEvent.data.eventId);
+}
+
 function renderGolfEvent() {
   const box = document.getElementById('golfEvent');
   if (!box) return;
@@ -3485,7 +3523,7 @@ function renderGolfEvent() {
         ${mine ? `<small class="golf-mine">${money(mine)} on this</small>` : ''}</div>
       <span class="odds">${fmtOdds(sel.americanOdds)}</span>
       ${locked
-        ? `<span class="golf-locked">${won ? 'WON' : '—'}</span>`
+        ? `<span class="golf-locked${won ? ' win' : ''}">${won ? 'WINNER' : '—'}</span>`
         : `<button class="add-btn" data-golf-pick="${sel.selectionId}">Add</button>`}
     </div>`;
   }).join('');
@@ -3512,6 +3550,17 @@ function renderGolfEvent() {
         No real-money wagering, deposits, withdrawals, or cash prizes are offered.</p>
       <div class="golf-list">${rows}</div>
     </section>
+    ${(() => {
+      const pend = pendingSettlement();
+      if (!pend.length) return '';
+      const owed = pend.reduce((a, t) => a + (t.selectionId === (GolfEvent.state().winner) ? t.returnAmount : 0), 0);
+      return `<div class="settle-pending">
+        <strong>${pend.length} ticket${pend.length === 1 ? '' : 's'} awaiting settlement.</strong>
+        The tournament is final${owed ? `, and ${money(owed)} is owed to you` : ''}, but bets are graded
+        centrally so every player settles at the same time.${Cloud.admin
+          ? ' You are an admin — open <code>?admin=1</code> to settle for everyone.'
+          : ' Your bankroll updates as soon as that happens.'}</div>`;
+    })()}
     ${final ? golfLeaderboardHtml() : ''}
     <div id="golfSlip"></div>`;
 
@@ -4749,7 +4798,7 @@ window.VIG = {
                RealBoard, NFL_NAMES, realMove, addButton, buildFeatured,
                refreshTickets, renderBetsLive, startBetTracking, openTickets, betLabel, get selected() { return selected; }, Fantasy, Store, DataSource, weekStats, SCORING, METRIC_DEFS,
                get bootErrors() { return bootErrors; }, tzParts, weekKeyFor, nextResetAt, RESET_TZ, RESET_HOUR,
-               GolfEvent, Admin, settleGolfEvent, golfLeaderboardHtml, golfTickets, getIdentity, saveIdentity, archiveWeek, blankWeek,
+               GolfEvent, Admin, settleGolfEvent, golfLeaderboardHtml, autoSettleFromEventData, pendingSettlement, golfTickets, getIdentity, saveIdentity, archiveWeek, blankWeek,
                Cloud, derivedBankroll, requireAccount,
                decimalOdds, americanFromDecimal, impliedProb, round2, fmtOdds, combinedAmerican, devigPair,
                devigProportional, devigPower, fairProbability, DEVIG_METHOD, round4, needsAccount, needsProfile, openAuth,
