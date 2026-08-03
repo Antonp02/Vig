@@ -2588,10 +2588,16 @@ function renderBetsLive() {
 /* Poll only while something is actually open, and back off when the tab
    is hidden so a phone in a pocket is not waking the radio every minute. */
 function startBetTracking() {
+  /* This used to return early when the device had no open tickets, so a
+     device whose bets were already graded stopped listening entirely and
+     never saw anything change — including a settlement done elsewhere.
+     It now always polls, just less often when nothing is pending. */
+  let idleTicks = 0;
   const tick = () => {
     if (typeof document !== 'undefined' && document.hidden) return;
-    if (!openTickets().length) { renderBetsLive(); return; }
-    refreshTickets({ quiet: false });
+    if (openTickets().length) { idleTicks = 0; refreshTickets({ quiet: false }); return; }
+    renderBetsLive();
+    if (++idleTicks >= 4) { idleTicks = 0; refreshTickets({ quiet: true }); }
   };
   clearInterval(trackTimer);
   trackTimer = setInterval(tick, 60000);
@@ -3760,14 +3766,62 @@ const Admin = {
   disable() { Store.set('vig.v2.admin', false); }
 };
 
+/* ONE settlement path, with one source of truth at a time.
+
+   Signed in : the database settles atomically, then every device
+               re-reads. The client never grades its own bets — RLS
+               rejects it anyway, and grading locally first is precisely
+               what let two devices disagree.
+   Local only: there is no database, so local storage is the truth. */
+async function settleAndSync(winnerId, { push = false } = {}) {
+  const lock = ['adminSettle', 'adminPush'].map(id => document.getElementById(id));
+  lock.forEach(b => { if (b) b.disabled = true; });
+
+  if (!(Cloud.enabled() && Cloud.signedIn())) {
+    const r = settleGolfEvent(winnerId, { push });
+    updateDashboard(); renderBets(activeBetFilter()); renderCompetition();
+    renderGolfEvent(); renderAdmin();
+    showToast(`Settled ${r.settled} bet${r.settled === 1 ? '' : 's'}, ${money(r.paid)} returned.`);
+    return r;
+  }
+
+  try {
+    const res = await Cloud.settleEvent(GolfEvent.data.eventId, winnerId, { push });
+    GolfEvent.setState({ status: 'final', winner: push ? null : winnerId,
+                         settledAt: new Date().toISOString() });
+    await syncFromCloud();                 // re-read rather than assume
+    await refreshLeaderboard();
+    renderGolfEvent(); renderAdmin();
+    showToast(res.settled
+      ? `Settled ${res.settled} for everyone · ${res.winners} won · ${money(res.paid)} paid.`
+      : 'Nothing left to settle.');
+    return res;
+  } catch (e) {
+    renderAdmin();
+    const msg = e && e.message ? e.message : 'failed';
+    showToast(/admin/i.test(msg) ? 'Admin only — this account cannot settle.'
+                                 : `Settlement failed: ${msg}`);
+    console.warn('[VIG] settlement failed:', msg);
+    return { settled: 0 };
+  }
+}
+
+let adminOpenCount = null;     // open bets on this event across ALL users
+
 function renderAdmin() {
   const box = document.getElementById('adminPanel');
   if (!box) return;
   if (!Admin.enabled() || !GolfEvent.data) { box.hidden = true; return; }
   box.hidden = false;
   const st = GolfEvent.state();
-  const open = golfTickets().filter(t => t.status === 'open').length;
+  /* These used to count only the ADMIN'S OWN tickets, so once the admin's
+     personal bet was graded the Settle button disabled itself while other
+     people's bets were still open in the database. `adminOpenCount` is the
+     server's number across every user; the local figure is only a fallback
+     for offline play. */
+  const localOpen = golfTickets().filter(t => t.status === 'open').length;
   const graded = golfTickets().filter(t => t.status !== 'open').length;
+  const open = (adminOpenCount === null) ? localOpen : adminOpenCount;
   const lt = Store.get(KEYS.lifetime, null);
 
   box.innerHTML = `
@@ -3797,6 +3851,12 @@ function renderAdmin() {
         <div class="admin-actions">
           <button class="primary" id="adminSettle" ${open ? '' : 'disabled'}>Settle ${open} bet${open === 1 ? '' : 's'}</button>
           <button class="secondary" id="adminPush" ${open ? '' : 'disabled'}>Void as push</button>
+        </div>
+        ${!open ? `<p class="admin-note">Nothing is open on this event${
+          adminOpenCount === null ? '' : ' anywhere'}. Settling is disabled because
+          there is nothing left to grade${st.settledAt ? ` — it was settled ${new Date(st.settledAt).toLocaleString()}` : ''}.
+          Use <b>Undo settlement</b> to reopen it.</p>` : ''}
+        <div class="admin-actions" hidden>
         </div>
         ${st.settledAt ? `<p class="admin-note">Settled ${new Date(st.settledAt).toLocaleString()}. Settling again pays nobody twice.</p>` : ''}
       </div>
@@ -3836,11 +3896,26 @@ function renderAdmin() {
                            renderCompetition(); renderAdmin(); };
 
   if (Cloud.enabled() && Cloud.signedIn()) {
+    /* refresh the cross-user open count, then repaint once it lands */
+    Cloud.eventOpenCount(GolfEvent.data.eventId).then(n => {
+      if (n !== null && n !== adminOpenCount) { adminOpenCount = n; renderAdmin(); }
+    });
+    Cloud.adminStats().then(st2 => {
+      const el = document.getElementById('adminUserCount');
+      if (!el) return;
+      if (!st2) { el.textContent = 'Could not read the signup count.'; return; }
+      el.innerHTML = `<b>${st2.signups}</b> account${st2.signups === 1 ? '' : 's'} · ` +
+        `${st2.profiles} with a display name · ${st2.bets} bet${st2.bets === 1 ? '' : 's'} placed` +
+        (st2.open_bets ? ` · ${st2.open_bets} open` : '') +
+        (st2.signups > st2.profiles
+          ? `<br><small>${st2.signups - st2.profiles} signed in but never chose a name — they will not appear on the leaderboard.</small>`
+          : '');
+    });
     Cloud.userCount().then(n => {
       const el = document.getElementById('adminUserCount');
-      if (el) el.textContent = (n === null)
-        ? 'Could not read the signup count.'
-        : `${n} signed-up user${n === 1 ? '' : 's'}.`;
+      /* superseded by adminStats() above; kept as a fallback only */
+      if (el && !el.innerHTML.trim()) el.textContent = (n === null)
+        ? 'Could not read the signup count.' : `${n} profile${n === 1 ? '' : 's'}.`;
     });
   }
 
@@ -3855,22 +3930,12 @@ function renderAdmin() {
     if (!w) { showToast('Choose the winning golfer first.'); return; }
     const name = (GolfEvent.find(w) || {}).name || w;
     if (!confirm(`Settle all open golf bets with ${name} as the winner?\n\nThis pays winners and marks the rest lost.`)) return;
-    const r = settleGolfEvent(w);
-    rerender();
-    if (Cloud.enabled() && Cloud.admin) {
-      Cloud.settleEvent(GolfEvent.data.eventId, w)
-        .then(res => { showToast(`Settled ${res.settled} bet${res.settled === 1 ? '' : 's'} for everyone.`); refreshLeaderboard(); })
-        .catch(e => showToast(`Settled locally. Server: ${e && e.message ? e.message : 'failed'}`));
-    } else {
-      showToast(`Settled ${r.settled} bet${r.settled === 1 ? '' : 's'}, ${money(r.paid)} returned.`);
-    }
+    settleAndSync(w, { push: false });
   };
 
   document.getElementById('adminPush').onclick = () => {
     if (!confirm('Void all open golf bets as push?\n\nEvery stake is returned with no profit.')) return;
-    const r = settleGolfEvent(null, { push: true });
-    rerender();
-    showToast(`${r.settled} bet${r.settled === 1 ? '' : 's'} pushed, ${money(r.paid)} returned.`);
+    settleAndSync(null, { push: true });
   };
 
   document.getElementById('adminFinalize').onclick = () => {
@@ -3892,8 +3957,22 @@ function renderAdmin() {
     showToast(`New week started at ${money(WEEKLY_BANKROLL)}.`);
   };
 
-  document.getElementById('adminUndo').onclick = () => {
+  document.getElementById('adminUndo').onclick = async () => {
     if (!confirm('Undo settlement?\n\nGolf bets return to open and the payouts are reversed.')) return;
+    if (Cloud.enabled() && Cloud.signedIn()) {
+      try {
+        const n = await Cloud.unsettleEvent(GolfEvent.data.eventId);
+        GolfEvent.setState({ status: 'open', winner: null, settledAt: null });
+        adminOpenCount = null;
+        await syncFromCloud();
+        await refreshLeaderboard();
+        renderGolfEvent(); renderAdmin();
+        showToast(`${n} bet${n === 1 ? '' : 's'} reopened for everyone.`);
+      } catch (e) {
+        showToast(`Could not undo: ${e && e.message ? e.message : 'failed'}`);
+      }
+      return;
+    }
     let reversed = 0;
     golfTickets().filter(t => t.settledAt).forEach(t => {
       if (t.status === 'won' || t.status === 'push') week.bankroll = round2(week.bankroll - t.returnAmount);
@@ -4117,7 +4196,7 @@ const Cloud = {
       throw new Error(error.message || 'bets read failed');
     }
     this.reachable = true;
-    return (data || []).map(rowToTicket);
+    return (data || []).map(rowToTicket).filter(Boolean);
   },
 
   async placeBet(ticket, weekKey) {
@@ -4142,29 +4221,48 @@ const Cloud = {
     };
     const { data, error } = await this.client.from('bets').insert(row).select().single();
     if (error) throw error;
-    return rowToTicket(data);
+    const t = rowToTicket(data);
+    if (!t) throw new Error('Server returned an unexpected row');
+    return t;
   },
 
-  /* Admin only — RLS rejects this for everyone else, which is the
-     whole point. Ordinary users have no UPDATE policy on bets. */
+  /* ONE atomic server call. This used to be a client-side loop that
+     updated rows one at a time AFTER the client had already changed its
+     own local copy — a dual write with local-first ordering, which is
+     what let two devices end up with different bankrolls. */
   async settleEvent(eventId, winnerSelectionId, { push = false } = {}) {
-    if (!this.admin) throw new Error('Admin only');
-    const { data: open, error: readErr } = await this.client
-      .from('bets').select('*').eq('event_id', eventId).eq('status', 'open');
-    if (readErr) throw readErr;
-    if (!open || !open.length) return { settled: 0 };
-    const now = new Date().toISOString();
-    let settled = 0;
-    for (const b of open) {
-      const status = push ? 'push' : (b.selection_id === winnerSelectionId ? 'won' : 'lost');
-      const { error } = await this.client.from('bets')
-        .update({ status, settled_at: now }).eq('id', b.id).eq('status', 'open');
-      if (!error) settled++;
-    }
-    await this.client.from('events').update({
-      status: 'final', winner_selection_id: push ? null : winnerSelectionId, updated_at: now
-    }).eq('event_id', eventId);
-    return { settled };
+    if (!this.client) throw new Error('Cloud not ready');
+    const { data, error } = await this.client.rpc('settle_event', {
+      p_event: eventId, p_selection: winnerSelectionId || null, p_push: !!push
+    });
+    if (error) throw error;
+    const row = Array.isArray(data) ? data[0] : data;
+    return {
+      settled: Number((row && row.settled) || 0),
+      winners: Number((row && row.winners) || 0),
+      paid: Number((row && row.paid) || 0)
+    };
+  },
+
+  async unsettleEvent(eventId) {
+    if (!this.client) throw new Error('Cloud not ready');
+    const { data, error } = await this.client.rpc('unsettle_event', { p_event: eventId });
+    if (error) throw error;
+    return Number(data || 0);
+  },
+
+  /* Open bets on an event across EVERY user, not just this one. */
+  async eventOpenCount(eventId) {
+    if (!this.signedIn()) return null;
+    const { data, error } = await this.client.rpc('event_open_count', { p_event: eventId });
+    return error ? null : Number(data || 0);
+  },
+
+  async adminStats() {
+    if (!this.signedIn()) return null;
+    const { data, error } = await this.client.rpc('admin_stats');
+    if (error) return null;
+    return Array.isArray(data) ? data[0] : data;
   },
 
   /* ---- shared reads ---- */
@@ -4312,6 +4410,15 @@ function renderSyncChip() {
 }
 
 function rowToTicket(r) {
+  /* A malformed or unexpected row used to produce a ticket with NaN stake,
+     which then poisoned derivedBankroll() and showed the user a bankroll of
+     NaN. Coerce defensively: a bad row becomes a harmless zero rather than
+     corrupting every downstream figure. */
+  const num = (v, d) => { const n = Number(v); return isFinite(n) ? n : d; };
+  if (!r || typeof r !== 'object' || Array.isArray(r)) {
+    console.warn('[VIG] unexpected bet row shape', r);
+    return null;
+  }
   return {
     id: r.id,
     kind: r.kind,
@@ -4325,14 +4432,14 @@ function rowToTicket(r) {
        become undefined, which would make the ticket invisible to every
        status filter and to settlement */
     status: r.status || 'open',
-    stake: Number(r.stake),
-    odds: Number(r.odds),
-    returnAmount: Number(r.potential_return),
+    stake: num(r.stake, 0),
+    odds: num(r.odds, 100),
+    returnAmount: num(r.potential_return, 0),
     settledAt: r.settled_at || undefined,
-    fairProb: (r.fair_prob === null || r.fair_prob === undefined) ? null : Number(r.fair_prob),
+    fairProb: (r.fair_prob === null || r.fair_prob === undefined) ? null : num(r.fair_prob, null),
     fairMethod: r.fair_method || null,
     bookPrices: r.book_prices || null,
-    closeProb: (r.close_prob === null || r.close_prob === undefined) ? null : Number(r.close_prob),
+    closeProb: (r.close_prob === null || r.close_prob === undefined) ? null : num(r.close_prob, null),
     legs: r.legs || [{ title: r.title, odds: Number(r.odds), gameId: null }],
     remote: true
   };
@@ -4343,11 +4450,14 @@ function rowToTicket(r) {
    ticket list. */
 function derivedBankroll(w) {
   const t = (w && w.tickets) || [];
-  const staked = t.reduce((a, x) => a + x.stake, 0);
+  const n = v => { const x = Number(v); return isFinite(x) ? x : 0; };
+  const staked = t.reduce((a, x) => a + n(x.stake), 0);
   const returned = t.reduce((a, x) =>
-    a + (x.status === 'won' ? x.returnAmount
-       : (x.status === 'push' || x.status === 'void') ? x.stake : 0), 0);
-  return round2(WEEKLY_BANKROLL - staked + returned);
+    a + (x.status === 'won' ? n(x.returnAmount)
+       : (x.status === 'push' || x.status === 'void') ? n(x.stake) : 0), 0);
+  const out = round2(WEEKLY_BANKROLL - staked + returned);
+  /* last line of defence — a bankroll of NaN is worse than a wrong one */
+  return isFinite(out) ? out : WEEKLY_BANKROLL;
 }
 
 
@@ -4861,9 +4971,10 @@ function renderAccountChip() {
 window.VIG = {
                playerFace, priorRank, initialsOf, faceOf,
                RealBoard, NFL_NAMES, realMove, addButton, buildFeatured,
-               refreshTickets, renderBetsLive, startBetTracking, openTickets, betLabel, get selected() { return selected; }, Fantasy, Store, DataSource, weekStats, SCORING, METRIC_DEFS,
+               refreshTickets, renderBetsLive, startBetTracking, openTickets, betLabel,
+               get adminOpenCount() { return adminOpenCount; }, get selected() { return selected; }, Fantasy, Store, DataSource, weekStats, SCORING, METRIC_DEFS,
                get bootErrors() { return bootErrors; }, tzParts, weekKeyFor, nextResetAt, RESET_TZ, RESET_HOUR,
-               GolfEvent, Admin, settleGolfEvent, golfLeaderboardHtml, autoSettleFromEventData, pendingSettlement, golfTickets, getIdentity, saveIdentity, archiveWeek, blankWeek,
+               GolfEvent, Admin, settleGolfEvent, settleAndSync, golfLeaderboardHtml, autoSettleFromEventData, pendingSettlement, golfTickets, getIdentity, saveIdentity, archiveWeek, blankWeek,
                Cloud, derivedBankroll, requireAccount,
                decimalOdds, americanFromDecimal, impliedProb, round2, fmtOdds, combinedAmerican, devigPair,
                devigProportional, devigPower, fairProbability, DEVIG_METHOD, round4, needsAccount, needsProfile, openAuth,

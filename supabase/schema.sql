@@ -275,3 +275,101 @@ begin
 end;
 $$;
 grant execute on function public.stamp_close(text, text, numeric) to authenticated;
+
+-- ============================================================
+-- v1.6 — production settlement
+--
+-- Settlement used to be a client-side loop: update each row, one
+-- request at a time, after the client had already changed its own local
+-- copy. That is a dual write with local-first ordering, and it produces
+-- two different truths the moment one half fails.
+--
+-- This makes settlement ONE atomic, idempotent server operation. The
+-- client asks the database to settle and then re-reads. There is no
+-- local settlement path when signed in.
+-- ============================================================
+create or replace function public.settle_event(
+  p_event     text,
+  p_selection text,
+  p_push      boolean default false
+) returns table (settled integer, winners integer, paid numeric)
+language plpgsql security definer set search_path = public as $$
+declare v_settled integer; v_winners integer; v_paid numeric;
+begin
+  if not public.is_admin() then
+    raise exception 'admin only' using errcode = '42501';
+  end if;
+
+  -- only rows still open are touched, so calling this twice is a no-op
+  with graded as (
+    update public.bets
+       set status = case
+             when p_push then 'push'
+             when selection_id is not distinct from p_selection then 'won'
+             else 'lost' end,
+           settled_at = now()
+     where event_id = p_event
+       and status = 'open'
+    returning status, stake, potential_return
+  )
+  select count(*)::int,
+         count(*) filter (where status = 'won')::int,
+         coalesce(sum(case when status = 'won' then potential_return
+                           when status = 'push' then stake
+                           else 0 end), 0)
+    into v_settled, v_winners, v_paid
+    from graded;
+
+  update public.events
+     set status = 'final',
+         winner_selection_id = case when p_push then null else p_selection end,
+         updated_at = now()
+   where event_id = p_event;
+
+  return query select v_settled, v_winners, v_paid;
+end;
+$$;
+grant execute on function public.settle_event(text, text, boolean) to authenticated;
+
+-- Reverse it. Also admin-only and also idempotent.
+create or replace function public.unsettle_event(p_event text)
+returns integer language plpgsql security definer set search_path = public as $$
+declare n integer;
+begin
+  if not public.is_admin() then
+    raise exception 'admin only' using errcode = '42501';
+  end if;
+  update public.bets
+     set status = 'open', settled_at = null
+   where event_id = p_event and status <> 'open';
+  get diagnostics n = row_count;
+  update public.events
+     set status = 'open', winner_selection_id = null, updated_at = now()
+   where event_id = p_event;
+  return n;
+end;
+$$;
+grant execute on function public.unsettle_event(text) to authenticated;
+
+-- How many bets are open on an event, across ALL users. The admin panel
+-- used to gate its own button on the admin's personal ticket list, so it
+-- disabled itself while other people's bets were still ungraded.
+create or replace function public.event_open_count(p_event text)
+returns integer language sql stable security definer set search_path = public as $$
+  select count(*)::int from public.bets
+   where event_id = p_event and status = 'open';
+$$;
+grant execute on function public.event_open_count(text) to authenticated;
+
+-- user_count() counted profiles only, so an account that signed in but
+-- never chose a display name was invisible — reporting 0 users while
+-- Authentication clearly listed one. Report both, so any gap is obvious.
+create or replace function public.admin_stats()
+returns table (signups integer, profiles integer, bets integer, open_bets integer)
+language sql stable security definer set search_path = public as $$
+  select (select count(*)::int from auth.users),
+         (select count(*)::int from public.profiles),
+         (select count(*)::int from public.bets),
+         (select count(*)::int from public.bets where status = 'open');
+$$;
+grant execute on function public.admin_stats() to authenticated;

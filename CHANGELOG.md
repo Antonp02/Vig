@@ -108,6 +108,88 @@ Three ways to close it:
 
 ---
 
+## v1.6.0 — Cloud architecture audit: one source of truth
+
+Reported: bankrolls diverging between two devices on the same account, the admin
+panel reporting 0 users, and settlement controls locking themselves out. All
+three trace to **one architectural fault**, not three separate bugs.
+
+### Root cause: dual write with local-first ordering
+
+Settlement did this:
+
+```
+1. settleGolfEvent(w)      -> graded LOCAL tickets, changed LOCAL bankroll
+2. rerender()              -> painted the local result as fact
+3. Cloud.settleEvent(...)  -> THEN wrote the database, row by row
+```
+
+Local was written first and treated as authoritative. Every symptom follows:
+
+- If step 3 failed, the device showed "won" while the database said "open".
+  Two truths, and the other device never learned.
+- The admin Settle button was gated on **the admin's own open tickets**, so once
+  their personal bet was locally graded the control disabled itself — while other
+  users' bets were still open in the database. That is the lock.
+- Polling only ran while **that device** had an open ticket, so a device whose
+  bets were already graded stopped listening entirely and never saw a settlement
+  performed elsewhere.
+
+### Fixed — settlement is now one atomic server operation
+
+`settle_event(event, selection, push)` is a single `security definer` Postgres
+function: it grades every open row for the event in one statement, updates the
+event, and returns counts. Admin-only, and idempotent by construction because it
+only touches rows still `open`.
+
+The client no longer grades anything when signed in. It calls the function, then
+**re-reads** — it never assumes its own write succeeded. There is exactly one
+settlement path (`settleAndSync`), which uses the database when signed in and
+local storage only when there is no database at all.
+
+`unsettle_event()` added for the same reason, so Undo is equally atomic.
+
+### Fixed — the admin panel now reads the database
+
+- `event_open_count(event)` — open bets across **all users**, so the Settle
+  button reflects reality rather than the admin's personal ticket list. When it
+  is zero the panel says why, instead of silently disabling.
+- `admin_stats()` replaces `user_count()`. The old function counted
+  `public.profiles` only, so an account that signed in but never chose a display
+  name was invisible — which is exactly why it read **0 users** while
+  Authentication listed one. It now reports **accounts, profiles, bets and open
+  bets separately**, and flags the gap explicitly.
+
+### Fixed — polling no longer stops
+
+Tracking used to return early when the device had nothing open. It now always
+polls, at a quarter of the rate when idle, so a settled device still notices
+changes made elsewhere.
+
+### Fixed — a NaN bankroll was possible
+
+An unexpected row shape produced a ticket with `NaN` stake, which propagated
+into `derivedBankroll()` and displayed a bankroll of NaN. `rowToTicket()` now
+coerces defensively and returns `null` on a malformed row rather than a poisoned
+ticket, and `derivedBankroll()` falls back to the weekly figure rather than
+returning NaN. A wrong number is bad; NaN is worse, because nothing downstream
+survives it.
+
+### Migration
+
+**Re-run `supabase/schema.sql`.** It is idempotent — every statement is
+`create or replace` or `if not exists` — and adds four functions:
+`settle_event`, `unsettle_event`, `event_open_count`, `admin_stats`.
+
+### Verified
+
+18 assertions simulating **two browsers against one shared database**: both see
+the same bet, settlement from one device grades the database, the other device
+picks it up without a manual refresh, both bankrolls agree, a second settle
+grades nothing, and undo propagates the same way.
+
+---
+
 ## v1.5.12 — Local-only bets are no longer lost
 
 **Fixed**
