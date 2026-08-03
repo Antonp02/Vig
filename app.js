@@ -2942,6 +2942,11 @@ function boot() {
   safely('cloud', () => {
     Cloud.init().then(ok => {
       renderAccountChip();
+      renderHeaderAvatar();
+      /* Cloud.init() is async, so the first render happened while
+         Cloud.enabled() was still false and took the local branch. Rebuild
+         once we actually know whether there is an account system. */
+      renderProfileCard();
       renderIdentityGate();
       renderAdmin();
       if (ok && Cloud.signedIn()) { syncFromCloud(); refreshLeaderboard(); }
@@ -2950,6 +2955,10 @@ function boot() {
   safely('identity', renderIdentityGate);
   safely('outbox', () => { renderSyncChip(); startOutboxRetry(); });
   safely('header avatar', renderHeaderAvatar);
+  /* build the menu up front — it used to be filled only on first tap, which
+     left a hardcoded v0.5 profile placeholder sitting
+     in the markup until then. */
+  safely('profile card', renderProfileCard);
   safely('real board', () => {
     RealBoard.load().then(() => {
       const real = RealBoard.toMarkets();
@@ -4643,10 +4652,14 @@ function onAuthChanged() {
         if (needsProfile()) openAuth('One more step.');
         else { closeAuth2(); syncFromCloud(); }
         renderAccountChip();
+        renderHeaderAvatar();
+        renderProfileCard();
         renderAdmin();
       });
     } else {
       renderAccountChip();
+      renderHeaderAvatar();
+      renderProfileCard();
       renderAuthGate();
     }
   });
@@ -4685,30 +4698,37 @@ function avatarHtml(a, cls) {
 function renderProfileCard() {
   const box = document.getElementById('profileMenu');
   if (!box) return;
-  const ident = getIdentity();
-  const a = avatarOf(Cloud.profile, ident);
+  /* A local display name left over from before accounts existed is NOT an
+     account. Showing it while signed out made the profile read as "a
+     different account" on a device that had simply never signed in. */
+  const signedIn = Cloud.enabled() && Cloud.signedIn();
+  const ident = (Cloud.enabled() && !signedIn) ? null : getIdentity();
+  const a = avatarOf(signedIn ? Cloud.profile : null, ident);
   const s = weekStats(week);
   const lt = Store.get(KEYS.lifetime, null);
-  const signedIn = Cloud.enabled() && Cloud.signedIn();
 
   box.innerHTML = `<div class="sheet-grip" aria-hidden="true"></div>
     <div class="profile-card">
       <button class="avatar-btn" id="avatarEdit" aria-label="Change avatar">
-        ${avatarHtml(a, 'lg')}<span class="avatar-pencil">✎</span>
+        ${avatarHtml(a, 'lg')}${(Cloud.enabled() && !signedIn) ? '' : '<span class="avatar-pencil">✎</span>'}
       </button>
       <div class="profile-who">
-        <strong>${a.name}</strong>
+        <strong>${signedIn ? a.name : (Cloud.enabled() ? 'Not signed in' : a.name)}</strong>
         <small>${signedIn ? (Cloud.email() || 'signed in')
-                          : (Cloud.enabled() ? 'Not signed in' : 'Local play')}</small>
+                          : (Cloud.enabled() ? 'Sign in to see your bets here' : 'Local play')}</small>
         ${ident && ident.code ? `<small class="profile-code">League ${ident.code}</small>` : ''}
       </div>
     </div>
+    ${(Cloud.enabled() && !signedIn) ? `
+      <button class="full primary profile-signin" data-profile-action="signin">Sign in or create account</button>
+      <p class="profile-hint">Your bankroll, bets and leaderboard place live with your account,
+        so they follow you to any device.</p>` : `
     <div class="profile-stats">
       <div><span>Bankroll</span><strong>${money(s.bankroll)}</strong></div>
       <div><span>This week</span><strong class="${s.realizedPL >= 0 ? 'positive' : 'negative'}">${s.realizedPL >= 0 ? '+' : ''}${money(s.realizedPL)}</strong></div>
       <div><span>ROI</span><strong>${s.roi === null ? '—' : `${s.roi >= 0 ? '+' : ''}${s.roi.toFixed(0)}%`}</strong></div>
       <div><span>All-time</span><strong>${lt ? `${lt.profit >= 0 ? '+' : ''}${money(lt.profit)}` : '—'}</strong></div>
-    </div>
+    </div>`}
     <div id="avatarPicker" class="avatar-picker" hidden>
       <p class="avatar-hint">Pick a colour</p>
       <div class="swatches">${AVATAR_COLORS.map(c =>
@@ -4728,7 +4748,10 @@ function renderProfileCard() {
 
   const edit = document.getElementById('avatarEdit');
   const picker = document.getElementById('avatarPicker');
-  if (edit) edit.onclick = () => { picker.hidden = !picker.hidden; };
+  if (edit) edit.onclick = () => {
+    if (Cloud.enabled() && !Cloud.signedIn()) { openAuth('Sign in to customise your profile.'); return; }
+    if (picker) picker.hidden = !picker.hidden;
+  };
 
   const saveAvatar = patch => {
     const local = Object.assign({ color: a.color, emoji: a.emoji }, Store.get(KEYS.avatar, {}) || {}, patch);

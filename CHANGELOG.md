@@ -108,6 +108,46 @@ Three ways to close it:
 
 ---
 
+## v1.5.11 — Mobile profile
+
+Reported from a phone: the profile showed a different account, and the menu was
+unusable — only "Help & feedback" visible. Four bugs, all mobile-facing.
+
+**Fixed**
+- **A hardcoded v0.5 profile placeholder was still in the markup** — a fake name,
+  handle and join date, left over from the prototype. It sat in the menu until
+  the first tap rebuilt it, and it is what appeared as "a different account".
+  Deleted; the menu is now built at boot and rebuilt on every auth change.
+- **A stale local display name was presented as an account.** A device that had
+  typed a name before accounts existed, then never signed in, showed that old
+  name as though it were the signed-in user. A local name is not an account: when
+  a backend exists and you are signed out, the profile now says **Not signed in**
+  and offers a real sign-in button, with the stats hidden because they would be
+  meaningless.
+- **The mobile sheet had no height cap.** Fixed to the bottom edge with no
+  `max-height`, it grew past the top of the screen, so everything above the last
+  item was off-viewport — which is why only "Help & feedback" was reachable. Now
+  capped at 82dvh, scrollable, with the grip pinned.
+- **The profile button rendered blank on mobile.** `.profile-btn span{display:none}`
+  was meant to hide the chevron, but the avatar is also a `span`, so it hid that
+  too. The chevron has its own class now.
+- The card was rendered before `Cloud.init()` resolved, so it took the local
+  branch and never rebuilt. It now rebuilds once the account system is known.
+
+**Changed**
+- Mobile profile card sized for a phone: 48px menu rows, 44px button, larger
+  colour swatches and badges, 4-across instead of 8.
+- Avatar editing asks you to sign in first when accounts exist, rather than
+  saving a customisation that would not follow you to another device.
+
+**Notes**
+- Same family as the prototype auth modal in v1.5.7: placeholder scaffolding that
+  survived because it still *rendered*. Worth a sweep for any others.
+- 32 new assertions across signed-out, signed-in and no-backend states.
+- Service worker cache to `v1.5.11`.
+
+---
+
 ## v1.5.10 — Winning tickets never paid
 
 **Fixed**

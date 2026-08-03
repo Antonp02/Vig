@@ -730,3 +730,37 @@ button,select,input,a{touch-action:manipulation}
 .settle-pending code{background:var(--panel2);padding:1px 5px;border-radius:4px;font-size:11px}
 .golf-locked.win{color:#4ad991;font-weight:900}
 .status.open{font-size:9px}
+
+/* ===================== v1.5.11 — mobile profile ===================== */
+.profile-signin{margin:4px 0 10px;min-height:46px}
+.profile-hint{margin:0 4px 12px;color:var(--muted);font-size:11px;line-height:1.55}
+
+@media(max-width:700px){
+  /* The sheet is fixed to the bottom edge, so without a height cap it grows
+     off the top of the screen and only the last item stays visible — which
+     is exactly what happened: everything above "Help & feedback" was above
+     the viewport. */
+  .profile-menu{max-height:82vh;max-height:82dvh;overflow-y:auto;-webkit-overflow-scrolling:touch}
+  /* the grip should not scroll away with the content */
+  .profile-menu .sheet-grip{position:sticky;top:0;z-index:2;background:#111824;
+    width:100%;height:auto;padding:6px 0 8px;margin:0 0 4px;border-radius:0}
+  .profile-menu .sheet-grip::after{content:'';display:block;width:38px;height:4px;
+    border-radius:99px;background:var(--line);margin:0 auto}
+  /* `.profile-btn span{display:none}` was hiding the AVATAR too, because the
+     avatar is a span — so the mobile profile button rendered blank. */
+  .profile-btn span{display:inline-grid}
+  .profile-btn .profile-caret{display:none}
+  .profile-btn{min-width:44px;min-height:44px;padding:0 9px;justify-content:center}
+  /* the card itself needs room on a phone */
+  .profile-card{padding:4px 4px 14px;gap:12px}
+  .profile-who strong{font-size:16px}
+  .profile-who small{max-width:60vw}
+  .profile-stats{grid-template-columns:1fr 1fr;gap:8px;padding:0 2px 12px}
+  .profile-stats strong{font-size:15px}
+  .profile-menu>button{min-height:48px;padding:13px 10px}
+  .swatches{grid-template-columns:repeat(4,1fr);gap:8px}
+  .swatch{height:36px}
+  .emojis{grid-template-columns:repeat(6,1fr);gap:8px}
+  .emoji{height:38px;font-size:17px}
+  .avatar-picker{padding-bottom:6px}
+}
