@@ -4,6 +4,159 @@ Newest first. Full technical detail lives in `README.md`.
 
 ---
 
+## Planned
+
+Not built yet. Listed so the scope of each is clear before it starts, and so
+"the API will handle it" gets tested against what the API actually sells.
+
+### v1.6 — Snapshot archive and real NFL settlement
+
+**Will add**
+- Vercel Cron writing odds snapshots to a Supabase table on a schedule. Today
+  `recordSnapshot()` writes to `localStorage` on page load, so the archive is
+  per-browser and effectively empty. This is what makes Line Winder a market
+  history rather than a chart of one session.
+- **NFL tickets settle themselves.** nflverse `schedules/games.csv` carries final
+  scores for every completed game and updates within hours of the whistle — free,
+  no paid tier needed. `refreshTickets()` is already pull-diff-apply, so this
+  changes one input rather than the machinery.
+- `stamp_close()` starts being called, which turns on CLV for every bet placed
+  since v1.5.2.
+
+**Side effect worth having:** hourly writes keep the free Supabase project awake,
+so the 7-day inactivity pause stops being a risk.
+
+**Requires:** moving to Vercel. GitHub Pages runs no serverless functions.
+
+### v1.7 — Live odds
+
+**Will add**
+- The Odds API on the $30 tier, wired through the existing `api/odds.js` proxy.
+- Multi-book prices, which is the first time the de-vig and consensus work means
+  anything — today it runs on one simulated book wearing four hats.
+- Golf and NFL both live.
+
+**Will need beyond paying:** `api/odds.js` is hardcoded to
+`americanfootball_nfl` and needs a sport parameter; `normalizeOddsApi()` handles
+only the `h2h` shape, and golf is `outrights` with a different payload.
+
+**Will NOT fix:** golf *results*. The Odds API sells prices, not outcomes, so
+settling a tournament stays manual until a results source is added.
+
+### v1.8 candidate — automate the fantasy data
+
+The honest gap. **None of the fantasy tab comes from the odds API** — it carries
+no projections, no player stats, no injury designations. So "Gibbs is projected
+22.5 and he is questionable" is the most useful line in the app and the least
+automated.
+
+| Data | Source | Automatic after v1.7? |
+|---|---|---|
+| Odds, line movement | The Odds API | **yes** |
+| Final scores → NFL settlement | nflverse | **yes** (v1.6) |
+| Weekly player stats | nflverse | **yes**, in-season |
+| Prior-season rank | nflverse | **yes**, once 2026 ends |
+| ESPN weekly projections | manual | **no** |
+| Injury status | manual | **no** |
+| Golf results | manual | **no** |
+
+Three ways to close it:
+
+1. **Sleeper's API** — free, public, no key, carries projections and injury
+   status. The actual fix, and independent of the odds work.
+2. **Compute projections from nflverse** — fully automatic and more honest, since
+   the method would be inspectable rather than a vendor's black box. Loses
+   pre-season numbers for rookies with no prior data.
+3. **Keep it manual** — ten minutes a week to re-paste the elite list. Fine at
+   six users.
+
+### Also queued, unscheduled
+
+- **Re-calibrate the draft grade** against real drafts. The A+ to F− scale was
+  fitted to 2,500 *simulated* drafts; if every real draft grades B+ it is not
+  measuring anything.
+- **Re-check the 83% weighting on rounds 1–5.** That was a judgment call, not a
+  measurement. Once a season finishes it becomes testable: do early picks really
+  explain that much of a final standing?
+- **Retry cap on the outbox.** It currently retries forever; a bet rejected for a
+  real reason rather than a network blip would loop indefinitely.
+- **Custom SMTP** so magic links reach people outside the Supabase org. Password
+  signup works today, which is why this is not urgent.
+
+---
+
+## v1.5.9 — Tournament result, elite projections, and a rank bug
+
+**Added**
+- **The golf event is settled.** M. Thorbjornsen won at −18, and he was not one
+  of the 19 named golfers — so **The Field (+250) pays** and every named
+  selection loses. Cantlay, our favourite, finished T8; Schauffele finished 2nd.
+  A better settlement test than a favourite winning.
+- **Final leaderboard in Trending** — 20 places with round scores, our own eight
+  selections marked, and the bettor's own pick highlighted. Explains in plain
+  words why The Field settles as the winner.
+- **44 elite Week 1 projections**, which closes a real gap: ESPN's "Add and
+  Research Players" list is sorted by rostered percentage, so it **never shows
+  the top 20 players** — they are rostered everywhere and therefore never
+  "available". Gibbs, Nacua, Hurts, Chase, McCaffrey, Barkley, Burrow and
+  Jefferson had *no projection at all*. That is why the 2026 outlook board looked
+  quarterback-heavy.
+- **Injury status flags** — Gibbs carries ESPN's QUES beside his projection.
+
+**Fixed**
+- **Elite players sorted to the bottom of the draft board.** The new rows carried
+  a *weekly* projection, but the board ranks on *season points per game*, so
+  their season total of zero put them last. Christian McCaffrey came out **RB60
+  in a 55-deep pool** — a rank outside the pool it was measured against, which
+  is what gave it away. The build now derives season figures from the weekly
+  projection for elite-only rows and marks them `derived`. McCaffrey is RB4,
+  Chase WR2, Josh Allen QB2.
+
+**Notes**
+- The top 10 by projection is now RB/WR-led with 2 quarterbacks, rather than
+  quarterback-dominated.
+- **The golf event now ships settled**, so no new golf bets can be placed until a
+  new event is loaded. Editing `data/golf-event.json` — set `status` back to
+  `open`, clear `winnerSelectionId`, drop in a new field — restarts it. The
+  admin panel can also reopen it.
+- Jeremiyah Love moved from #4 to #16 on the outlook board — not a regression;
+  the genuine top-20 now correctly sit above a rookie.
+- Service worker cache to `v1.5.9`.
+
+---
+
+## v1.5.8 — Player faces and last year's finish
+
+**Added**
+- **A headshot on every player.** nflverse ships an official NFL CDN URL on each
+  weekly row, so this cost one field in the build script and **no images in the
+  bundle** — 45 KB of URLs, everything served from the NFL's own CDN rather than
+  hotlinking anyone's site. 543 of 543 real players covered.
+- **Prior-season positional finish** — "RB4 last yr" beside every name, with the
+  season point total in the tooltip. Computed from actual 2025 PPR totals inside
+  each position, so it is a real finish rather than a projection.
+- Faces appear in the draft pool, the roster panel, draft results and the compare
+  panel; the compare subtitle now reads "finished RB1".
+
+**Notes**
+- **D/ST have no photo** because they are not people — they show a team code
+  instead. So do the 43 players who arrived in 2026 and have no 2025 row; they
+  correctly have no prior rank either.
+- The fallback badge sits *underneath* the image and shows through until it
+  loads, so a slow connection never leaves an empty hole and a dead URL degrades
+  to initials rather than a broken-image icon. Images are lazy-loaded.
+
+**Changed**
+- Service worker cache to `v1.5.8`.
+
+**Next**
+- Worth re-checking two calibrations once the 2026 season produces real results:
+  the draft grade scale was fitted to 2,500 *simulated* drafts, and the 83%
+  weighting on rounds 1–5 was a judgment call rather than a measurement. Both
+  become testable against actual outcomes.
+
+---
+
 ## v1.5.7 — Prototype auth removed
 
 **Fixed**

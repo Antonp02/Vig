@@ -2037,6 +2037,36 @@ function finishDraft() {
   showToast(`Draft complete — grade ${result.letter}.`);
 }
 
+/* A face and a prior-season finish. The headshot is an official NFL CDN
+   URL that ships with the nflverse data — no images in the bundle, no
+   hotlinking anyone's site. D/ST have no photo because they are not
+   people, so they get a team badge; a broken image falls back to the
+   same badge rather than showing a torn-page icon. */
+function playerFace(name, pos, team, img, cls) {
+  const badge = `<span class="face-badge">${pos === 'DST' ? (team || '??') : initialsOf(name)}</span>`;
+  if (!img) return `<span class="face ${cls || ''}">${badge}</span>`;
+  return `<span class="face ${cls || ''}">${badge}` +
+         `<img src="${img}" alt="" loading="lazy" decoding="async" ` +
+         `onload="this.parentNode.classList.add('loaded')" ` +
+         `onerror="this.remove()"></span>`;
+}
+/* headshot by name, for the places that only carry a name string */
+function faceOf(name) {
+  if (!Fantasy.data) return null;
+  const hit = Fantasy.data.all.find(x => x.n === name);
+  return hit ? hit.img : null;
+}
+function initialsOf(n) {
+  return String(n || '').trim().split(/\s+/).slice(0, 2)
+    .map(w => w[0]).join('').toUpperCase() || '?';
+}
+/* "RB4 last year" — the most useful thing you can put beside a name. */
+function priorRank(pl) {
+  if (!pl || !pl.pr) return '';
+  const pos = pl.p === 'DST' ? 'D/ST' : pl.p;
+  return `<span class="prior" title="${pl.pt} PPR points in 2025">${pos}${pl.pr} <i>last yr</i></span>`;
+}
+
 function playerRow(p, active, roster) {
   const fits = roster ? assignSlot(roster, p[2]) : null;
   /* If every slot this position could occupy is taken and the bench is
@@ -2052,16 +2082,22 @@ function playerRow(p, active, roster) {
   const vbd = typeof p[4] === 'number'
     ? `<small>${p[4] >= 0 ? '+' : ''}${p[4].toFixed(1)} VOR</small>`
     : '<small class="no-metric">no data</small>';
+  const flag = pr && pr.status
+    ? `<i class="inj ${pr.status.toLowerCase()}" title="ESPN status: ${pr.status}">${pr.status}</i>` : '';
   const projCell = pr
-    ? `<small class="proj-cell"><b>${pr.proj.toFixed(1)}</b> proj · ${pr.fpts.toFixed(0)} szn · ${pr.rost.toFixed(0)}%</small>`
+    ? `<small class="proj-cell"><b>${pr.proj.toFixed(1)}</b> proj${flag}${
+        pr.fpts ? ` · ${pr.fpts.toFixed(0)} szn` : ''}${
+        pr.rost ? ` · ${pr.rost.toFixed(0)}%` : ''}</small>`
     : '<small class="proj-cell no-metric">—</small>';
   const btn = !active ? '<span></span>'
     : blocked ? '<button class="add-btn draft-btn" disabled title="No open slot for this position">No slot</button>'
     : `<button class="add-btn draft-btn" data-draft="${p[1]}">Draft</button>`;
   const rookie = p[7] ? '<span class="need-chip rookie">2026 only</span>' : '';
+  const meta = Fantasy.data ? Fantasy.data.all.find(x => x.n === p[1]) : null;
   return `<div class="player-row${blocked ? ' blocked' : ''}">
     <div class="player-rank">${p[0]}</div>
-    <div><strong>${p[1]}</strong><small>${p[3] || 'FA'} ${rookie} ${tag}</small></div>
+    ${playerFace(p[1], p[2], p[3], meta && meta.img)}
+    <div><strong>${p[1]}</strong><small>${p[3] || 'FA'} ${priorRank(meta)} ${rookie} ${tag}</small></div>
     <span class="position-chip">${p[2] === 'DST' ? 'D/ST' : p[2]}</span>
     ${projCell}
     ${vbd}
@@ -2079,13 +2115,13 @@ function renderRosterPanel(roster) {
     const r = filled(s.id);
     return `<div class="roster-slot ${r ? 'filled' : 'open'}">
       <span class="slot-tag">${s.label}</span>
-      ${r ? `<div><strong>${r.name}</strong><small>${r.pos === 'DST' ? 'D/ST' : r.pos}${r.team ? ` · ${r.team}` : ''}</small></div>`
+      ${r ? `${playerFace(r.name, r.pos, r.team, faceOf(r.name), 'xs')}<div><strong>${r.name}</strong><small>${r.pos === 'DST' ? 'D/ST' : r.pos}${r.team ? ` · ${r.team}` : ''}</small></div>`
           : '<div class="slot-empty">—</div>'}
     </div>`;
   }).join('') + `<div class="bench-head">Bench ${bench.length}/${BENCH_SLOTS}</div>` +
     (bench.length ? bench.map(r => `<div class="roster-slot bench filled">
         <span class="slot-tag">BE</span>
-        <div><strong>${r.name}</strong><small>${r.pos === 'DST' ? 'D/ST' : r.pos}${r.team ? ` · ${r.team}` : ''}</small></div>
+        ${playerFace(r.name, r.pos, r.team, faceOf(r.name), 'xs')}<div><strong>${r.name}</strong><small>${r.pos === 'DST' ? 'D/ST' : r.pos}${r.team ? ` · ${r.team}` : ''}</small></div>
       </div>`).join('')
       : '<div class="slot-empty pad">No bench players yet</div>');
 }
@@ -2368,6 +2404,7 @@ function renderDraftResults(res) {
   const bench = res.rows.filter(r => !r.starter);
   const line = r => `<div class="res-row">
       <span class="slot-tag">${slotLabel(r.slot)}</span>
+      ${playerFace(r.name, r.pos, r.team, faceOf(r.name), 'xs')}
       <div><strong>${r.name}</strong><small>${r.pos === 'DST' ? 'D/ST' : r.pos}${r.team ? ` · ${r.team}` : ''}</small></div>
       <div class="res-round">R${r.round}</div>
       <div class="res-rank">${r.rated ? `${ordinal(r.rank)}<small>of ${r.pool}</small>` : `—<small>unrated</small>`}</div>
@@ -3252,14 +3289,16 @@ function renderCompare() {
   box.innerHTML = `
     <div class="cmp-head">
       <div class="cmp-player" style="--c:${colours[0]}">
+        ${playerFace(a.n, a.p, a.t, a.img, 'lg')}
         <strong>${a.n}</strong>
-        <small>${posLabel}${a.t ? ` · ${a.t}` : ''} · ${pa.games} games · <b>${ordinal(overallA.rank)} of ${overallA.total}</b></small>
+        <small>${posLabel}${a.t ? ` · ${a.t}` : ''} · ${pa.games} games · <b>${ordinal(overallA.rank)} of ${overallA.total}</b>${a.pr ? ` · finished ${posLabel}${a.pr}` : ''}</small>
         ${sparkline(pa.weekly, colours[0])}
       </div>
       <div class="cmp-vs">vs</div>
       <div class="cmp-player align-right" style="--c:${colours[1]}">
+        ${playerFace(b.n, b.p, b.t, b.img, 'lg')}
         <strong>${b.n}</strong>
-        <small>${posLabel}${b.t ? ` · ${b.t}` : ''} · ${pb.games} games · <b>${ordinal(overallB.rank)} of ${overallB.total}</b></small>
+        <small>${posLabel}${b.t ? ` · ${b.t}` : ''} · ${pb.games} games · <b>${ordinal(overallB.rank)} of ${overallB.total}</b>${b.pr ? ` · finished ${posLabel}${b.pr}` : ''}</small>
         ${sparkline(pb.weekly, colours[1])}
       </div>
     </div>
@@ -3353,7 +3392,12 @@ const GolfEvent = {
   /* admin overrides persist; the file stays the source of truth for odds */
   state() {
     const saved = Store.get(KEYS.golf, null);
-    const base = { status: (this.data && this.data.status) || 'open', winner: null, settledAt: null };
+    const base = {
+      status: (this.data && this.data.status) || 'open',
+      /* the event file can ship an already-settled result */
+      winner: (this.data && this.data.winnerSelectionId) || null,
+      settledAt: null
+    };
     return Object.assign(base, saved || {});
   },
   setState(patch) {
@@ -3380,6 +3424,40 @@ function fmtEventDate(iso) {
     return new Date(iso).toLocaleDateString(undefined,
       { weekday: 'short', month: 'short', day: 'numeric' });
   } catch (e) { return iso; }
+}
+
+/* Final leaderboard. Shown once the event settles, with our own selections
+   marked so a bettor can see exactly where their pick landed. */
+function golfLeaderboardHtml() {
+  const res = GolfEvent.data && GolfEvent.data.results;
+  if (!res || !res.leaderboard) return '';
+  const st = GolfEvent.state();
+  const winner = st.winner || GolfEvent.data.winnerSelectionId;
+  const mine = new Set(golfTickets().map(t => t.selectionId));
+  return `<section class="panel golf-final">
+    <div class="panel-head"><div><span class="eyebrow">FINAL LEADERBOARD</span>
+      <h2>${res.winner} wins at ${res.toPar}</h2>
+      <p class="muted-copy">${res.note || ''}</p></div>
+      <span class="status-pill final">Final</span></div>
+    ${winner === 'g-field' ? `<p class="golf-field-note">
+      No listed golfer won, so <b>The Field</b> settles as the winner at
+      ${fmtOdds((GolfEvent.find('g-field') || {}).americanOdds || 250)}.
+      Every named selection loses.</p>` : ''}
+    <div class="lb-head"><span>Pos</span><span>Player</span><span>To par</span><span>R1</span><span>R2</span></div>
+    <div class="lb-rows">${res.leaderboard.map(r => {
+      const onBoard = !!r.sel;
+      const backed = r.sel && mine.has(r.sel);
+      return `<div class="lb-row${onBoard ? ' on-board' : ''}${backed ? ' backed' : ''}">
+        <span class="lb-pos">${r.pos}</span>
+        <span class="lb-name">${r.name}${backed ? '<i class="lb-tag">your pick</i>'
+          : onBoard ? '<i class="lb-tag dim">on the board</i>' : ''}</span>
+        <span class="lb-par">${r.toPar}</span>
+        <span class="lb-r">${r.r1}</span>
+        <span class="lb-r">${r.r2}</span>
+      </div>`;
+    }).join('')}</div>
+    <p class="disclaimer">Result data shown for a settled mock event. Virtual funds only.</p>
+  </section>`;
 }
 
 function renderGolfEvent() {
@@ -3434,6 +3512,7 @@ function renderGolfEvent() {
         No real-money wagering, deposits, withdrawals, or cash prizes are offered.</p>
       <div class="golf-list">${rows}</div>
     </section>
+    ${final ? golfLeaderboardHtml() : ''}
     <div id="golfSlip"></div>`;
 
   box.querySelectorAll('[data-golf-pick]').forEach(b => b.onclick = () => {
@@ -4666,10 +4745,11 @@ function renderAccountChip() {
 /* Debug handle. Open the console and poke at VIG.Fantasy.profile(...)
    or VIG.DataSource.mode while working on this. */
 window.VIG = {
+               playerFace, priorRank, initialsOf, faceOf,
                RealBoard, NFL_NAMES, realMove, addButton, buildFeatured,
                refreshTickets, renderBetsLive, startBetTracking, openTickets, betLabel, get selected() { return selected; }, Fantasy, Store, DataSource, weekStats, SCORING, METRIC_DEFS,
                get bootErrors() { return bootErrors; }, tzParts, weekKeyFor, nextResetAt, RESET_TZ, RESET_HOUR,
-               GolfEvent, Admin, settleGolfEvent, golfTickets, getIdentity, saveIdentity, archiveWeek, blankWeek,
+               GolfEvent, Admin, settleGolfEvent, golfLeaderboardHtml, golfTickets, getIdentity, saveIdentity, archiveWeek, blankWeek,
                Cloud, derivedBankroll, requireAccount,
                decimalOdds, americanFromDecimal, impliedProb, round2, fmtOdds, combinedAmerican, devigPair,
                devigProportional, devigPower, fairProbability, DEVIG_METHOD, round4, needsAccount, needsProfile, openAuth,

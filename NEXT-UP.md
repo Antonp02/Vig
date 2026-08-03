@@ -62,6 +62,47 @@ resume (~30s). With twelve users and a quiet week that is a real risk. Two outs:
 
 ---
 
+### What v1.7 actually automates — and what it does not
+
+The Odds API sells **betting prices**. It carries no fantasy projections, no
+player stats and no injury designations, so none of the numbers in the fantasy
+tab come from it. Worth being precise about, because "the API will handle it" is
+true for half this list and false for the other half.
+
+| Data | Source | Automatic? |
+|---|---|---|
+| Odds and line movement | The Odds API | **yes** (v1.7) |
+| Final scores → NFL settlement | nflverse `games.csv` | **yes**, and free |
+| Weekly player stats | nflverse | **yes**, in-season |
+| Prior-season rank | nflverse | **yes**, once 2026 ends |
+| ESPN weekly projections | manual | **no** |
+| Injury status | manual | **no** |
+| Golf results | manual | **no** — the odds API has prices, not results |
+
+**NFL settlement does not need the paid tier.** `schedules/games.csv` carries
+final scores for every completed game and updates within hours. `refreshTickets()`
+is already pull-diff-apply, so swapping "an admin settled it" for "the game has a
+final score" changes one input, not the machinery. That lands at v1.6 with the
+cron.
+
+**Golf settlement stays manual** unless a results source is added. The Odds API
+will price a tournament; it will not tell you who won it.
+
+### v1.8 candidate — automate the fantasy data
+
+The gap above is real: "Gibbs is projected 22.5 and he is questionable" is the
+most useful line in the fantasy tab and the least automated. Three ways out:
+
+1. **Sleeper's API** — free, public, no key, carries projections and injury
+   status. The actual fix, and independent of v1.7.
+2. **Compute projections from nflverse** — fully automatic and more honest, since
+   the method would be inspectable rather than a black box. Loses pre-season
+   numbers for rookies with no prior data.
+3. **Keep it manual** — ten minutes a week to re-paste the elite list. Fine at
+   this scale; the current users would never know.
+
+---
+
 ## Road to v1.7 (the official URL)
 
 | Version | Ships | Notes |

@@ -5,33 +5,271 @@
   "startTime": "2026-08-06T08:00:00-04:00",
   "lockTime": "2026-08-06T08:00:00-04:00",
   "endTime": "2026-08-09T19:00:00-04:00",
-  "status": "open",
+  "status": "final",
   "markets": [
     {
       "marketId": "tournament-winner",
       "name": "Tournament Winner",
       "selections": [
-        { "selectionId": "g-cantlay",    "name": "Patrick Cantlay",   "americanOdds": 700,  "note": "Favourite" },
-        { "selectionId": "g-gerard",     "name": "Ryan Gerard",       "americanOdds": 750 },
-        { "selectionId": "g-fowler",     "name": "Rickie Fowler",     "americanOdds": 800 },
-        { "selectionId": "g-schauffele", "name": "Xander Schauffele", "americanOdds": 1400 },
-        { "selectionId": "g-brennan",    "name": "Michael Brennan",   "americanOdds": 2000 },
-        { "selectionId": "g-bradley",    "name": "Keegan Bradley",    "americanOdds": 2250 },
-        { "selectionId": "g-ghim",       "name": "Doug Ghim",         "americanOdds": 3000 },
-        { "selectionId": "g-novak",      "name": "Andrew Novak",      "americanOdds": 3000 },
-        { "selectionId": "g-greyserman", "name": "Max Greyserman",    "americanOdds": 3000 },
-        { "selectionId": "g-hossler",    "name": "Beau Hossler",      "americanOdds": 3000 },
-        { "selectionId": "g-dunlap",     "name": "Nick Dunlap",       "americanOdds": 4000 },
-        { "selectionId": "g-yu",         "name": "Kevin Yu",          "americanOdds": 4000 },
-        { "selectionId": "g-knapp",      "name": "Jake Knapp",        "americanOdds": 4000 },
-        { "selectionId": "g-smalley",    "name": "Alex Smalley",      "americanOdds": 4000 },
-        { "selectionId": "g-thompson",   "name": "Davis Thompson",    "americanOdds": 5000 },
-        { "selectionId": "g-stevens",    "name": "Sam Stevens",       "americanOdds": 5000 },
-        { "selectionId": "g-hall",       "name": "Harry Hall",        "americanOdds": 5000 },
-        { "selectionId": "g-whaley",     "name": "Vince Whaley",      "americanOdds": 5000 },
-        { "selectionId": "g-mccarty",    "name": "Matt McCarty",      "americanOdds": 5000 },
-        { "selectionId": "g-field",      "name": "The Field",         "americanOdds": 250,  "note": "any golfer not listed" }
+        {
+          "selectionId": "g-cantlay",
+          "name": "Patrick Cantlay",
+          "americanOdds": 700,
+          "note": "Favourite"
+        },
+        {
+          "selectionId": "g-gerard",
+          "name": "Ryan Gerard",
+          "americanOdds": 750
+        },
+        {
+          "selectionId": "g-fowler",
+          "name": "Rickie Fowler",
+          "americanOdds": 800
+        },
+        {
+          "selectionId": "g-schauffele",
+          "name": "Xander Schauffele",
+          "americanOdds": 1400
+        },
+        {
+          "selectionId": "g-brennan",
+          "name": "Michael Brennan",
+          "americanOdds": 2000
+        },
+        {
+          "selectionId": "g-bradley",
+          "name": "Keegan Bradley",
+          "americanOdds": 2250
+        },
+        {
+          "selectionId": "g-ghim",
+          "name": "Doug Ghim",
+          "americanOdds": 3000
+        },
+        {
+          "selectionId": "g-novak",
+          "name": "Andrew Novak",
+          "americanOdds": 3000
+        },
+        {
+          "selectionId": "g-greyserman",
+          "name": "Max Greyserman",
+          "americanOdds": 3000
+        },
+        {
+          "selectionId": "g-hossler",
+          "name": "Beau Hossler",
+          "americanOdds": 3000
+        },
+        {
+          "selectionId": "g-dunlap",
+          "name": "Nick Dunlap",
+          "americanOdds": 4000
+        },
+        {
+          "selectionId": "g-yu",
+          "name": "Kevin Yu",
+          "americanOdds": 4000
+        },
+        {
+          "selectionId": "g-knapp",
+          "name": "Jake Knapp",
+          "americanOdds": 4000
+        },
+        {
+          "selectionId": "g-smalley",
+          "name": "Alex Smalley",
+          "americanOdds": 4000
+        },
+        {
+          "selectionId": "g-thompson",
+          "name": "Davis Thompson",
+          "americanOdds": 5000
+        },
+        {
+          "selectionId": "g-stevens",
+          "name": "Sam Stevens",
+          "americanOdds": 5000
+        },
+        {
+          "selectionId": "g-hall",
+          "name": "Harry Hall",
+          "americanOdds": 5000
+        },
+        {
+          "selectionId": "g-whaley",
+          "name": "Vince Whaley",
+          "americanOdds": 5000
+        },
+        {
+          "selectionId": "g-mccarty",
+          "name": "Matt McCarty",
+          "americanOdds": 5000
+        },
+        {
+          "selectionId": "g-field",
+          "name": "The Field",
+          "americanOdds": 250,
+          "note": "any golfer not listed"
+        }
       ]
     }
-  ]
+  ],
+  "winnerSelectionId": "g-field",
+  "results": {
+    "winner": "Matt Thorbjornsen",
+    "toPar": -18,
+    "note": "No listed golfer won \u2014 The Field pays.",
+    "leaderboard": [
+      {
+        "pos": "1",
+        "name": "M. Thorbjornsen",
+        "toPar": -18,
+        "r1": 69,
+        "r2": 64
+      },
+      {
+        "pos": "2",
+        "name": "X. Schauffele",
+        "toPar": -16,
+        "r1": 66,
+        "r2": 66,
+        "sel": "g-schauffele"
+      },
+      {
+        "pos": "3",
+        "name": "D. Riley",
+        "toPar": -15,
+        "r1": 68,
+        "r2": 64
+      },
+      {
+        "pos": "4",
+        "name": "R. Hojgaard",
+        "toPar": -14,
+        "r1": 69,
+        "r2": 68
+      },
+      {
+        "pos": "T5",
+        "name": "H. Matsuyama",
+        "toPar": -13,
+        "r1": 67,
+        "r2": 68
+      },
+      {
+        "pos": "T5",
+        "name": "M. Wallace",
+        "toPar": -13,
+        "r1": 67,
+        "r2": 64
+      },
+      {
+        "pos": "T5",
+        "name": "K. Ventura",
+        "toPar": -13,
+        "r1": 68,
+        "r2": 66
+      },
+      {
+        "pos": "T8",
+        "name": "D. Thompson",
+        "toPar": -12,
+        "r1": 67,
+        "r2": 68,
+        "sel": "g-thompson"
+      },
+      {
+        "pos": "T8",
+        "name": "R. Gerard",
+        "toPar": -12,
+        "r1": 63,
+        "r2": 69,
+        "sel": "g-gerard"
+      },
+      {
+        "pos": "T8",
+        "name": "P. Cantlay",
+        "toPar": -12,
+        "r1": 64,
+        "r2": 66,
+        "sel": "g-cantlay"
+      },
+      {
+        "pos": "T8",
+        "name": "M. Kim",
+        "toPar": -12,
+        "r1": 65,
+        "r2": 67
+      },
+      {
+        "pos": "T8",
+        "name": "C. Kirk",
+        "toPar": -12,
+        "r1": 65,
+        "r2": 67
+      },
+      {
+        "pos": "T8",
+        "name": "R. Fowler",
+        "toPar": -12,
+        "r1": 63,
+        "r2": 68,
+        "sel": "g-fowler"
+      },
+      {
+        "pos": "T8",
+        "name": "C. Young",
+        "toPar": -12,
+        "r1": 69,
+        "r2": 61
+      },
+      {
+        "pos": "T15",
+        "name": "D. Ghim",
+        "toPar": -11,
+        "r1": 65,
+        "r2": 67,
+        "sel": "g-ghim"
+      },
+      {
+        "pos": "T15",
+        "name": "K. Bradley",
+        "toPar": -11,
+        "r1": 65,
+        "r2": 68,
+        "sel": "g-bradley"
+      },
+      {
+        "pos": "T15",
+        "name": "S. Im",
+        "toPar": -11,
+        "r1": 67,
+        "r2": 69
+      },
+      {
+        "pos": "T15",
+        "name": "R. Hoey",
+        "toPar": -11,
+        "r1": 66,
+        "r2": 69
+      },
+      {
+        "pos": "T15",
+        "name": "M. Brennan",
+        "toPar": -11,
+        "r1": 65,
+        "r2": 67,
+        "sel": "g-brennan"
+      },
+      {
+        "pos": "T20",
+        "name": "C. Blanchet",
+        "toPar": -10,
+        "r1": 72,
+        "r2": 65
+      }
+    ]
+  }
 }

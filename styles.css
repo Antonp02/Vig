@@ -661,3 +661,66 @@ button,select,input,a{touch-action:manipulation}
 .live-dot.off{background:var(--line)}
 @media(max-width:700px){.bets-live .text-btn{min-height:38px}}
 .account-actions[hidden]{display:none}
+
+/* ===================== v1.5.8 — player faces + prior finish ===================== */
+/* The badge sits underneath and shows through until the photo loads, so a
+   slow connection never leaves an empty hole, and a dead URL degrades to
+   initials instead of a broken-image icon. */
+.face{position:relative;display:inline-grid;place-items:center;width:34px;height:34px;
+  border-radius:50%;overflow:hidden;flex:0 0 auto;background:var(--accent-dark);
+  border:1px solid var(--line)}
+.face img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
+  object-position:top center;opacity:0;transition:opacity .18s}
+.face.loaded img{opacity:1}
+.face-badge{font-size:11px;font-weight:900;color:var(--accent-soft);letter-spacing:-.02em}
+.face.xs{width:26px;height:26px}
+.face.xs .face-badge{font-size:9px}
+.face.sm{width:30px;height:30px}
+.face.lg{width:52px;height:52px;margin-bottom:8px}
+.face.lg .face-badge{font-size:16px}
+.prior{display:inline-block;font-size:10px;font-weight:800;color:var(--accent-soft);
+  background:var(--accent-dark);padding:2px 7px;border-radius:999px;margin-left:4px}
+.prior i{font-style:normal;font-weight:600;opacity:.7}
+/* rows gain a face column */
+.player-row{grid-template-columns:34px 34px 1fr auto auto auto auto}
+.roster-slot{align-items:center}
+.res-row{grid-template-columns:52px 26px minmax(0,1fr) 34px 76px 64px 46px}
+.cmp-player{display:flex;flex-direction:column;align-items:flex-start}
+.cmp-player.align-right{align-items:flex-end}
+@media(max-width:900px){
+  .player-row{grid-template-columns:28px 30px 1fr auto auto auto}
+  .res-row{grid-template-columns:46px 24px minmax(0,1fr) 30px 62px 44px}
+}
+@media(max-width:620px){
+  .player-row{grid-template-columns:24px 28px 1fr auto auto}
+  .res-row{grid-template-columns:40px 22px minmax(0,1fr) 26px 52px 40px}
+  .prior i{display:none}
+}
+
+/* ===================== v1.5.9 — golf result + elite projections ===================== */
+.golf-final{margin-bottom:20px;border-color:var(--accent-dark)}
+.golf-field-note{margin:16px 0;padding:11px 13px;border-left:3px solid #4ad991;
+  background:rgba(74,217,145,.08);color:var(--text);font-size:12px;line-height:1.55}
+.golf-field-note b{color:#4ad991}
+.lb-head,.lb-row{display:grid;grid-template-columns:48px 1fr 60px 40px 40px;gap:8px;
+  align-items:center;padding:9px 6px}
+.lb-head{color:var(--muted);font-size:10px;letter-spacing:.08em;text-transform:uppercase;
+  border-bottom:1px solid var(--line)}
+.lb-row{border-bottom:1px solid var(--line);font-size:13px}
+.lb-row:last-child{border-bottom:0}
+.lb-row.on-board{background:rgba(255,255,255,.022)}
+.lb-row.backed{background:var(--accent-dark)}
+.lb-pos{color:var(--muted);font-weight:800;font-size:11px}
+.lb-name{font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lb-tag{font-style:normal;font-size:9px;font-weight:800;margin-left:7px;
+  padding:2px 6px;border-radius:999px;background:var(--accent);color:#08101a}
+.lb-tag.dim{background:var(--panel2);color:var(--muted)}
+.lb-par{font-weight:800;color:#4ad991;text-align:right}
+.lb-r{color:var(--muted);font-size:12px;text-align:right}
+.inj{font-style:normal;font-size:9px;font-weight:900;margin-left:5px;padding:1px 5px;
+  border-radius:4px;background:rgba(232,189,105,.18);color:var(--gold);letter-spacing:.03em}
+.inj.out,.inj.ir{background:rgba(255,125,142,.16);color:var(--red)}
+@media(max-width:700px){
+  .lb-head,.lb-row{grid-template-columns:40px 1fr 52px}
+  .lb-r{display:none}
+}

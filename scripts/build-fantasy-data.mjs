@@ -247,20 +247,115 @@ if (existsSync(LINES_PATH)) {
   }).filter(Boolean);
 }
 
+/* ---- 6. Headshots + prior-season finish ----------------------------
+   nflverse carries an official NFL CDN headshot on every weekly row, so
+   photos cost nothing: one URL per player, no images in the bundle, no
+   hotlinking to a third party's site. D/ST have none — they are not
+   people — and fall back to a team badge in the UI.
+
+   Prior-season rank is the positional finish by total PPR points across
+   the season being built. "RB4 last year" is the single most useful
+   thing you can put next to a name on a draft board.
+------------------------------------------------------------------- */
+const headshots = new Map();
+pRows.forEach(r => {
+  const name = (r.player_display_name || r.player_name || '').trim();
+  const url = (r.headshot_url || '').trim();
+  if (name && url && !headshots.has(name)) headshots.set(name, url);
+});
+
+/* ---- 7. Elite Week 1 projections -----------------------------------
+   ESPN's "Add and Research Players" list is sorted by rostered percentage,
+   so it never shows the top ~20 players — they are rostered everywhere and
+   therefore never "available". Gibbs, Nacua, Hurts, Chase, McCaffrey,
+   Barkley, Burrow and Jefferson had NO projection at all, which is why the
+   2026 outlook board looked quarterback-heavy. These come from the league
+   player list instead and take precedence where they overlap.
+------------------------------------------------------------------- */
+const ELITE_PATH = 'data/espn-week1-elite.tsv';
+let elite = [];
+if (existsSync(ELITE_PATH)) {
+  const lines = readFileSync(ELITE_PATH, 'utf8').split('\n').filter(l => l.trim());
+  const head = lines.shift().split('\t').map(h => h.trim());
+  const at = k => head.indexOf(k);
+  elite = lines.map(l => {
+    const c = l.split('\t');
+    const name = (c[at('name')] || '').trim();
+    if (!name) return null;
+    return {
+      n: name, sn: searchKey(name),
+      t: (c[at('team')] || '').trim(),
+      p: (c[at('pos')] || '').trim().toUpperCase(),
+      opp: (c[at('opp')] || '').trim(),
+      proj: r1(num(c[at('proj')])),
+      status: (c[at('status')] || '').trim() || null,
+      elite: true
+    };
+  }).filter(Boolean);
+}
+
 const keep = m => [...m.values()].filter(p => p.s.length >= MIN_GAMES);
 const total = p => p.s.reduce((a, v, i) => a + v + p.r[i], 0);
 const sortByTotal = a => a.sort((x, y) => total(y) - total(x));
+
+/* headshot + prior finish onto every player before writing */
+function decorate(list) {
+  /* positional finish by total PPR points, computed within this list */
+  const byPos = {};
+  list.forEach(p => (byPos[p.p] = byPos[p.p] || []).push(p));
+  Object.values(byPos).forEach(group => {
+    group
+      .map(p => ({ p, tot: p.s.reduce((a, v, i) => a + v + (p.r[i] || 0), 0) }))
+      .sort((a, b) => b.tot - a.tot)
+      .forEach((x, i) => {
+        x.p.pr = i + 1;                       // prior-season positional rank
+        x.p.pt = r1(x.tot);                   // prior-season total points
+      });
+  });
+  list.forEach(p => {
+    const url = headshots.get(p.n);
+    if (url) p.img = url;
+  });
+  return list;
+}
 
 const out = {
   season: SEASON, source: 'nflverse', license: 'CC-BY 4.0',
   built: new Date().toISOString().slice(0, 10), minGames: MIN_GAMES,
   scoring: { K_SCORING, DST_SCORING },
   schedule: { season: SCHEDULE_SEASON, week: 1, featureDate: FEATURE_DATE, games: sched },
-  projections: { season: '2026', source: 'ESPN (manual)', rows: projections },
+  projections: (() => {
+    const byName = {};
+    projections.forEach(r => (byName[r.n] = r));
+    elite.forEach(e => {
+      const hit = byName[e.n];
+      if (hit) {
+        hit.proj = e.proj;                    // fresher weekly number
+        /* keep the existing season fpts/avg — they came from the same
+           source and are a full-season view rather than one week */
+        hit.opp = e.opp || hit.opp;
+        if (e.status) hit.status = e.status;
+        hit.elite = true;
+      } else {
+        /* Top-20 players the availability list never carried. They arrive
+           with a WEEKLY projection only, but the draft board ranks on
+           season points per game — so leaving fpts at 0 sent every elite
+           player to the bottom of the board. ESPN's PROJ is a next-game
+           estimate, which is the same quantity as a per-game average, so
+           derive the season figures from it and flag them as derived. */
+        byName[e.n] = Object.assign({
+          fpts: r1(e.proj * 17), avg: e.proj, gp: 17,
+          rost: 100, st: 0, derived: true
+        }, e);
+      }
+    });
+    const rows = Object.values(byName).sort((a, b) => (b.proj || 0) - (a.proj || 0));
+    return { season: '2026', source: 'ESPN (manual)', elite: elite.length, rows };
+  })(),
   knownLines,
-  players: sortByTotal(keep(offMap)),
-  kickers: sortByTotal(keep(kMap)),
-  defenses: sortByTotal(keep(dMap))
+  players: decorate(sortByTotal(keep(offMap))),
+  kickers: decorate(sortByTotal(keep(kMap))),
+  defenses: decorate(sortByTotal(keep(dMap))),
 };
 
 const { writeFileSync, mkdirSync } = await import('node:fs');
@@ -273,6 +368,8 @@ out.players.forEach(p => byPos[p.p] = (byPos[p.p] || 0) + 1);
 console.log(`  offence: ${Object.entries(byPos).map(([k, v]) => `${k} ${v}`).join(', ')}`);
 console.log(`  kickers: ${out.kickers.length} | defenses: ${out.defenses.length}`);
 console.log(`wrote ${path} — ${(JSON.stringify(out).length / 1024).toFixed(0)} KB`);
+console.log(`  elite week-1 projections: ${elite.length}`);
+console.log(`  headshots: ${headshots.size} available`);
 console.log(`  projections: ${projections.length} players from ESPN 2026`);
 console.log(`  known real lines: ${knownLines.length}`);
 console.log(`  schedule: ${sched.length} games (${sched.filter(g=>g.date===FEATURE_DATE).length} on ${FEATURE_DATE})`);
