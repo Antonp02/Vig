@@ -108,6 +108,46 @@ Three ways to close it:
 
 ---
 
+## v1.5.12 — Local-only bets are no longer lost
+
+**Fixed**
+- **A bet placed while the app was in local mode disappeared once accounts
+  connected.** `syncFromCloud()` replaces the ticket list with the server's, and
+  a ticket that was never uploaded is in neither the remote list nor the outbox —
+  so it was silently dropped.
+
+  This was not hypothetical. A blank `config.js` put the app in local mode, a
+  $100 bet on The Field was placed and settled there, and that winning ticket
+  plus its $350 existed only in one browser. The phone, reading from Supabase,
+  correctly showed no such bet.
+
+  Local tickets are now **detected and uploaded** rather than discarded.
+  Cloud-placed tickets carry a Supabase uuid; locally-placed ones carry a `VIG-`
+  prefix, which makes them trivially distinguishable.
+
+- A settled local ticket uploads as **open**, because RLS refuses an insert with
+  any other status — a user cannot declare their own bet a winner. The admin
+  settling the event then grades it, which lands it in the same place. Verified:
+  bankroll comes back to the same figure.
+
+- `rowToTicket()` now defaults a missing status to `open`. An undefined status
+  would make a ticket invisible to every filter and to settlement.
+
+**Changed**
+- **`config.js` is no longer included in release zips.** Shipping a blank
+  template next to an update meant "copy everything across" could silently
+  replace working keys with empty ones — which is exactly how the bug above
+  happened. The file now lives only in your repo. `SUPABASE-SETUP.md` documents
+  how to recreate it.
+- Service worker cache to `v1.5.12`.
+
+**Notes**
+- 16 new assertions covering the whole recovery: local ticket survives the sync,
+  reaches the database as open, is graded by the admin, restores the bankroll,
+  and a second sync creates no duplicates.
+
+---
+
 ## v1.5.11 — Mobile profile
 
 Reported from a phone: the profile showed a different account, and the menu was

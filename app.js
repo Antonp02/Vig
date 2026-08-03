@@ -2527,6 +2527,7 @@ async function refreshTickets({ quiet = false } = {}) {
   const byId = {};
   remote.forEach(t => (byId[t.id] = t));
   const changed = [];
+  migrateLocalTickets(remote);
   week.tickets = week.tickets.map(local => {
     const r = byId[local.id];
     if (!r) return local;                       // queued locally, not yet sent
@@ -4233,6 +4234,36 @@ const Outbox = {
   clear() { Store.set(KEYS.outbox, []); renderSyncChip(); }
 };
 
+/* A ticket placed while the app was in local mode — no Supabase keys, or
+   keys that had been blanked — exists only in this browser. Once the cloud
+   connects, syncFromCloud() replaces the ticket list with the server's, and
+   anything never uploaded is silently dropped. That is data loss, and it
+   happened for real: a settled winning bet vanished because config.js was
+   blank when it was placed.
+
+   Cloud-placed tickets carry a Supabase uuid. Locally-placed ones carry a
+   VIG- prefix, so the two are trivially distinguishable. */
+const LOCAL_ID = /^VIG-/;
+
+function localOnlyTickets(remote) {
+  const remoteIds = new Set((remote || []).map(t => t.id));
+  const queued = new Set(Outbox.all().map(x => x.ticket.id));
+  return week.tickets.filter(t =>
+    LOCAL_ID.test(String(t.id || '')) && !remoteIds.has(t.id) && !queued.has(t.id));
+}
+
+/* Upload them rather than discarding them. RLS only accepts an insert with
+   status 'open', which is correct — a user cannot declare their own bet a
+   winner. A settled local ticket therefore uploads as open and is graded by
+   the admin settling the event, which lands it in the same state. */
+function migrateLocalTickets(remote) {
+  const orphans = localOnlyTickets(remote);
+  if (!orphans.length) return 0;
+  orphans.forEach(t => Outbox.add(Object.assign({}, t, { status: 'open' }), week.key));
+  console.warn(`[VIG] ${orphans.length} local-only ticket(s) queued for upload`);
+  return orphans.length;
+}
+
 let flushing = false;
 
 /* Returns how many made it. Safe to call repeatedly — each success
@@ -4290,7 +4321,10 @@ function rowToTicket(r) {
     date: new Date(r.placed_at).toLocaleString(undefined,
       { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }),
     placedAt: r.placed_at,
-    status: r.status,
+    /* the column defaults to 'open' server-side; never let a missing value
+       become undefined, which would make the ticket invisible to every
+       status filter and to settlement */
+    status: r.status || 'open',
     stake: Number(r.stake),
     odds: Number(r.odds),
     returnAmount: Number(r.potential_return),
@@ -4618,6 +4652,14 @@ async function syncFromCloud() {
       renderBetsLive();
       return;
     }
+    /* rescue anything placed offline or in local mode BEFORE the list is
+       replaced, otherwise it disappears here */
+    const rescued = migrateLocalTickets(remote);
+    if (rescued) {
+      await flushOutbox();
+      remote = await Cloud.myBets(week.key);
+      showToast(`${rescued} bet${rescued === 1 ? '' : 's'} from this device uploaded to your account.`);
+    }
     const pending = Outbox.all().map(x => x.ticket);
     const remoteIds = new Set(remote.map(t => t.id));
     week.tickets = remote.concat(pending.filter(t => !remoteIds.has(t.id)));
@@ -4827,7 +4869,7 @@ window.VIG = {
                devigProportional, devigPower, fairProbability, DEVIG_METHOD, round4, needsAccount, needsProfile, openAuth,
                refreshLeaderboard, syncFromCloud, AUTH_GATED_VIEWS, cloudUnreachable,
                get authMode2() { return authMode2; }, set authMode2(v) { authMode2 = v; },
-               Outbox, flushOutbox, renderSyncChip, renderBets, activeBetFilter, WEEKLY_BET_LIMIT, WEEKLY_BANKROLL, week, renderProfileCard, avatarOf, AVATAR_COLORS, renderHeaderAvatar, renderHomeGames,
+               Outbox, flushOutbox, renderSyncChip, migrateLocalTickets, localOnlyTickets, renderBets, activeBetFilter, WEEKLY_BET_LIMIT, WEEKLY_BANKROLL, week, renderProfileCard, avatarOf, AVATAR_COLORS, renderHeaderAvatar, renderHomeGames,
                get cloudBoard() { return cloudBoard; },
                updateLifetime, AUTO_ROLLOVER, renderGolfEvent, renderAdmin,
                ROSTER_SLOTS, DRAFT_ROUNDS, assignSlot, ordinal, buildDraftPool,

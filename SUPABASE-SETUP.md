@@ -1,3 +1,27 @@
+
+## About `config.js`
+
+**This file is deliberately not included in release zips.** It holds your two
+Supabase keys, and shipping a blank template alongside an update means a
+"copy everything across" replaces your working config with an empty one. That
+happened once: the app silently fell back to local mode, bets stopped reaching
+the database, and a settled winning ticket existed only in one browser.
+
+So the file lives in your repo and nowhere else. If it is ever missing, create
+it next to `index.html`:
+
+```js
+window.VIG_CONFIG = {
+  SUPABASE_URL: 'https://YOURPROJECT.supabase.co',
+  SUPABASE_ANON_KEY: 'sb_publishable_YOURKEY'
+};
+```
+
+Keep a copy of those two values somewhere outside the repo — a note on your
+phone is fine. They are recoverable from the dashboard, but knowing that at 1am
+is different from having them.
+
+---
 # Supabase setup — about 10 minutes, once
 
 Until you finish this, the app runs exactly as it did in v1.4.4: local only,
