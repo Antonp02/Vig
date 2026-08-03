@@ -108,6 +108,48 @@ Three ways to close it:
 
 ---
 
+## v1.6.2 — Missing table grants
+
+**Fixed**
+- **`permission denied for table bets`.** Postgres needs two separate things to
+  allow an operation, and the schema only supplied one:
+
+  | | question it answers | v1.6.1 |
+  |---|---|---|
+  | `GRANT` | may this role touch the table at all? | **missing** |
+  | RLS policy | which rows may it touch? | present, ten of them |
+
+  A missing grant fails *before* RLS is consulted — which is why the error was
+  "permission denied" rather than an empty result. Supabase usually applies these
+  grants automatically on a new project; depending on that was the mistake. They
+  are now explicit in `schema.sql`, placed **before** the policies, since a
+  policy without a grant is unreachable.
+
+  This is very likely the root of the whole cross-device problem: reads were
+  failing, `syncFromCloud()` caught the error and kept local data by design, and
+  each device quietly stayed on its own copy. The bankrolls were never
+  reconciling because they were never successfully reading each other.
+
+- The sync report now names this failure specifically — "the authenticated role
+  has no grant on this table" — rather than surfacing the raw Postgres string,
+  which does not say what to fix.
+
+**Migration**
+
+Run **`v1.6.2-grants.sql`**. Idempotent, and it ends with a verification query
+listing what `authenticated` can reach. `bets`, `profiles`, `events` and
+`admins` should all appear.
+
+`admins` is granted **select only** — it is never writable from the client.
+`bets` includes UPDATE because the admin settlement policy requires it; RLS
+still restricts that to admins, so an ordinary user holding the grant changes
+nothing.
+
+`alter default privileges` is set too, so any table added later inherits the
+same treatment instead of reproducing this bug.
+
+---
+
 ## v1.6.1 — The app can now diagnose itself
 
 Two devices disagreeing had no way to say *why* without a console, and "is this

@@ -97,6 +97,43 @@ returns boolean language sql stable security definer set search_path = public as
 $$;
 
 -- ============================================================
+-- VIG — missing table grants
+--
+-- "permission denied for table bets" is a GRANT problem, not RLS.
+-- Two separate mechanisms have to both allow an operation:
+--
+--   GRANT  — may this role touch this table at all?
+--   POLICY — which rows may it touch?
+--
+-- The schema enabled RLS and wrote ten policies but never granted the
+-- underlying privileges, so every read failed before RLS was consulted.
+-- Supabase usually grants these by default on a new project; relying on
+-- that was the mistake. This makes it explicit.
+--
+-- Safe to run more than once.
+-- ============================================================
+
+grant usage on schema public to authenticated, anon;
+
+-- Users read and create their own bets. UPDATE is granted because the
+-- admin settlement policy needs it — RLS still restricts it to admins,
+-- so an ordinary user gaining UPDATE here changes nothing.
+grant select, insert, update on public.bets     to authenticated;
+grant select, insert, update on public.profiles to authenticated;
+grant select, insert, update on public.events   to authenticated;
+grant select                 on public.admins   to authenticated;
+
+-- Sequences, in case any table gains a serial column later.
+grant usage, select on all sequences in schema public to authenticated;
+
+-- Anything added from here on gets the same treatment automatically.
+alter default privileges in schema public
+  grant select, insert, update on tables to authenticated;
+alter default privileges in schema public
+  grant usage, select on sequences to authenticated;
+
+
+-- ============================================================
 -- Row Level Security
 -- ============================================================
 alter table public.profiles enable row level security;

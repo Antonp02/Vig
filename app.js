@@ -6,7 +6,7 @@
 
 /* Build stamp. Every "is this device on the new code?" question has cost a
    round trip; now it is on screen. Bumped with the service worker cache. */
-const VIG_BUILD = 'v1.6.1';
+const VIG_BUILD = 'v1.6.2';
 
 /* ---------- 0. Persistence ---------- */
 const KEYS = {
@@ -3836,7 +3836,12 @@ async function syncReport() {
     rep.agrees = rep.remoteCount === rep.localCount
               && Math.abs(rep.remoteBankroll - rep.localBankroll) < 0.01;
   } catch (e) {
-    rep.error = e && e.message ? e.message : 'read failed';
+    const msg = e && e.message ? e.message : 'read failed';
+    /* A missing GRANT and an empty result are very different problems, and
+       the raw Postgres wording does not say which to fix. */
+    rep.error = /permission denied/i.test(msg)
+      ? 'permission denied — the authenticated role has no grant on this table. Run the grants migration.'
+      : msg;
   }
   return rep;
 }
