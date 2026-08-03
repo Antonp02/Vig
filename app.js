@@ -4,6 +4,10 @@
    Line Winder, Trending Sports board.
    ============================================================ */
 
+/* Build stamp. Every "is this device on the new code?" question has cost a
+   round trip; now it is on screen. Bumped with the service worker cache. */
+const VIG_BUILD = 'v1.6.1';
+
 /* ---------- 0. Persistence ---------- */
 const KEYS = {
   week:      'vig.v2.week',
@@ -3808,6 +3812,77 @@ async function settleAndSync(winnerId, { push = false } = {}) {
 
 let adminOpenCount = null;     // open bets on this event across ALL users
 
+/* What this device holds, versus what the database holds. Built because
+   two devices disagreeing had no way to say WHY without a console. */
+async function syncReport() {
+  const local = week.tickets || [];
+  const localBank = derivedBankroll(week);
+  const rep = {
+    build: VIG_BUILD,
+    signedIn: Cloud.enabled() && Cloud.signedIn(),
+    email: Cloud.email(),
+    weekKey: week.key,
+    localCount: local.length,
+    localBankroll: localBank,
+    localOnly: local.filter(t => /^VIG-/.test(String(t.id || ''))).map(t => t.id),
+    queued: Outbox.count(),
+    remoteCount: null, remoteBankroll: null, agrees: null, error: null
+  };
+  if (!rep.signedIn) return rep;
+  try {
+    const remote = await Cloud.myBets(week.key);
+    rep.remoteCount = remote.length;
+    rep.remoteBankroll = derivedBankroll({ tickets: remote });
+    rep.agrees = rep.remoteCount === rep.localCount
+              && Math.abs(rep.remoteBankroll - rep.localBankroll) < 0.01;
+  } catch (e) {
+    rep.error = e && e.message ? e.message : 'read failed';
+  }
+  return rep;
+}
+
+function renderSyncReport(rep) {
+  const el = document.getElementById('adminSync');
+  if (!el) return;
+  if (!rep.signedIn) {
+    el.innerHTML = `<p class="admin-note">Build <b>${rep.build}</b> · not signed in — local only.</p>`;
+    return;
+  }
+  const row = (k, v, warn) => `<div class="sr-row${warn ? ' warn' : ''}"><span>${k}</span><strong>${v}</strong></div>`;
+  el.innerHTML = `
+    <div class="sync-report">
+      ${row('Build', rep.build)}
+      ${row('Account', rep.email || '—')}
+      ${row('Week', rep.weekKey)}
+      ${row('Tickets here', rep.localCount)}
+      ${row('Tickets on server', rep.error ? 'unreadable' : rep.remoteCount, !!rep.error)}
+      ${row('Bankroll here', money(rep.localBankroll))}
+      ${row('Bankroll on server', rep.error ? '—' : money(rep.remoteBankroll),
+            rep.agrees === false)}
+      ${rep.localOnly.length ? row('Not yet uploaded', rep.localOnly.length, true) : ''}
+      ${rep.queued ? row('Queued to send', rep.queued, true) : ''}
+    </div>
+    <p class="admin-note">${
+      rep.error ? `Server unreadable: ${rep.error}`
+      : rep.agrees ? 'This device matches the database.'
+      : `<b>Out of step.</b> ${rep.localOnly.length
+          ? `${rep.localOnly.length} ticket(s) on this device were never uploaded — Force resync will send them.`
+          : 'Force resync will pull the server\'s version.'}`}</p>
+    <div class="admin-actions">
+      <button class="secondary" id="adminResync">Force resync</button>
+    </div>`;
+  const btn = document.getElementById('adminResync');
+  if (btn) btn.onclick = async () => {
+    btn.disabled = true; btn.textContent = 'Syncing…';
+    await syncFromCloud();
+    await refreshLeaderboard();
+    updateDashboard(); renderBets(activeBetFilter()); renderGolfEvent();
+    const again = await syncReport();
+    renderSyncReport(again);
+    showToast(again.agrees ? 'In sync with the database.' : 'Still out of step — see the report.');
+  };
+}
+
 function renderAdmin() {
   const box = document.getElementById('adminPanel');
   if (!box) return;
@@ -3872,6 +3947,11 @@ function renderAdmin() {
           ${lt.profit >= 0 ? '+' : ''}${money(lt.profit)} · ${lt.weeks} week${lt.weeks === 1 ? '' : 's'} archived</p>` : ''}
       </div>
 
+      <div class="admin-block wide">
+        <h3>Sync report</h3>
+        <div id="adminSync"><p class="admin-note">Reading…</p></div>
+      </div>
+
       <div class="admin-block">
         <h3>Users</h3>
         <p class="admin-note" id="adminUserCount">${Cloud.enabled()
@@ -3894,6 +3974,8 @@ function renderAdmin() {
 
   const rerender = () => { renderGolfEvent(); updateDashboard(); renderBets(activeBetFilter());
                            renderCompetition(); renderAdmin(); };
+
+  syncReport().then(renderSyncReport);
 
   if (Cloud.enabled() && Cloud.signedIn()) {
     /* refresh the cross-user open count, then repaint once it lands */
@@ -4893,6 +4975,7 @@ function renderProfileCard() {
     <button data-profile-action="friends">Leaderboard &amp; groups</button>
     <button data-profile-action="bets">My bets</button>
     <button data-profile-action="help">Help &amp; feedback</button>
+    <p class="build-stamp">Build ${VIG_BUILD}</p>
     <div class="profile-divider"></div>
     ${signedIn
       ? '<button data-profile-action="signout">Sign out</button>'
@@ -4972,6 +5055,7 @@ window.VIG = {
                playerFace, priorRank, initialsOf, faceOf,
                RealBoard, NFL_NAMES, realMove, addButton, buildFeatured,
                refreshTickets, renderBetsLive, startBetTracking, openTickets, betLabel,
+               VIG_BUILD, syncReport, renderSyncReport,
                get adminOpenCount() { return adminOpenCount; }, get selected() { return selected; }, Fantasy, Store, DataSource, weekStats, SCORING, METRIC_DEFS,
                get bootErrors() { return bootErrors; }, tzParts, weekKeyFor, nextResetAt, RESET_TZ, RESET_HOUR,
                GolfEvent, Admin, settleGolfEvent, settleAndSync, golfLeaderboardHtml, autoSettleFromEventData, pendingSettlement, golfTickets, getIdentity, saveIdentity, archiveWeek, blankWeek,

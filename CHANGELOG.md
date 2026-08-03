@@ -108,6 +108,39 @@ Three ways to close it:
 
 ---
 
+## v1.6.1 — The app can now diagnose itself
+
+Two devices disagreeing had no way to say *why* without a console, and "is this
+device running the new code?" cost a round trip every time. Both fixed.
+
+**Added**
+- **Build stamp.** `v1.6.1` at the bottom of the profile card, matching the
+  service worker cache version. If two devices show different builds, that is the
+  answer before any other investigation starts.
+- **Sync report** in the admin panel — for this device, side by side:
+  tickets here vs on the server, bankroll here vs on the server, how many tickets
+  have never been uploaded, how many are queued. It says plainly whether the
+  device matches the database, and if not, what will fix it.
+- **Force resync** — uploads anything local-only, re-reads the server, and
+  re-reports. One button instead of a reload-and-hope.
+
+**Why this exists**
+
+A real report: desktop $1,124, mobile $975. The arithmetic gives it away —
+`1000 − 25 + 0 = 975` on the phone versus `1000 − 226 + 350` on the laptop. That
+is not a calculation difference, it is **a different list of tickets**: roughly
+$201 of stakes plus a $350 return that only ever existed in one browser. The sync
+report shows exactly that, in the app, without anyone having to do the sum.
+
+**Notes**
+- The mobile profile fixes from v1.5.11 are present and correct in this build. A
+  phone still showing only "Sign out" is running cached older code — which the
+  build stamp now makes obvious at a glance.
+- 15 new assertions, including a reproduction of the real divergence and a
+  verification that Force resync reconciles it.
+
+---
+
 ## v1.6.0 — Cloud architecture audit: one source of truth
 
 Reported: bankrolls diverging between two devices on the same account, the admin

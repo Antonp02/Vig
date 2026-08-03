@@ -764,3 +764,12 @@ button,select,input,a{touch-action:manipulation}
   .emoji{height:38px;font-size:17px}
   .avatar-picker{padding-bottom:6px}
 }
+.admin-block.wide{grid-column:1/-1}
+.sync-report{display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-bottom:10px}
+.sr-row{display:flex;justify-content:space-between;gap:10px;padding:8px 10px;
+  border:1px solid var(--line);border-radius:9px;background:rgba(255,255,255,.018);font-size:12px}
+.sr-row span{color:var(--muted)}
+.sr-row.warn{border-color:var(--gold);background:rgba(232,189,105,.08)}
+.sr-row.warn strong{color:var(--gold)}
+.build-stamp{margin:8px 4px 0;color:var(--muted);font-size:10px;text-align:center;letter-spacing:.05em}
+@media(max-width:700px){.sync-report{grid-template-columns:1fr}}
