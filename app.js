@@ -6,7 +6,7 @@
 
 /* Build stamp. Every "is this device on the new code?" question has cost a
    round trip; now it is on screen. Bumped with the service worker cache. */
-const VIG_BUILD = 'v1.6.4';
+const VIG_BUILD = 'v1.6.6';
 
 /* ---------- 0. Persistence ---------- */
 const KEYS = {
@@ -20,6 +20,7 @@ const KEYS = {
   identity:  'vig.v2.identity',
   lifetime:  'vig.v2.lifetime',
   outbox:    'vig.v2.outbox',
+  rejected:  'vig.v2.rejected',
   avatar:    'vig.v2.avatar'
 };
 
@@ -3922,17 +3923,32 @@ async function syncReport() {
     weekKey: week.key,
     localCount: local.length,
     localBankroll: localBank,
-    localOnly: local.filter(t => /^VIG-/.test(String(t.id || ''))).map(t => t.id),
+    localOnly: local.filter(t => LOCAL_ID.test(String(t.id || ''))).map(t => t.id),
     queued: Outbox.count(),
+    rejected: DeadLetter.all(),
     remoteCount: null, remoteBankroll: null, agrees: null, error: null
   };
   if (!rep.signedIn) return rep;
   try {
     const remote = await Cloud.myBets(week.key);
+    /* Adopt any server row this device is still holding under a placeholder
+       id, so the report describes the truth rather than a stale label. */
+    rep.adopted = reconcileWithRemote(remote);
+    if (rep.adopted) {
+      rep.localOnly = (week.tickets || []).filter(t => LOCAL_ID.test(String(t.id || ''))).map(t => t.id);
+      rep.queued = Outbox.count();
+      rep.localBankroll = derivedBankroll(week);
+      rep.localCount = (week.tickets || []).length;
+    }
     rep.remoteCount = remote.length;
     rep.remoteBankroll = derivedBankroll({ tickets: remote });
+    /* "In sync" must mean nothing is outstanding, not merely that two totals
+       happen to match. A queued or rejected ticket is a difference. */
     rep.agrees = rep.remoteCount === rep.localCount
-              && Math.abs(rep.remoteBankroll - rep.localBankroll) < 0.01;
+              && Math.abs(rep.remoteBankroll - rep.localBankroll) < 0.01
+              && rep.queued === 0
+              && rep.localOnly.length === 0
+              && rep.rejected.length === 0;
   } catch (e) {
     const msg = e && e.message ? e.message : 'read failed';
     /* A missing GRANT and an empty result are very different problems, and
@@ -3964,7 +3980,12 @@ function renderSyncReport(rep) {
             rep.agrees === false)}
       ${rep.localOnly.length ? row('Not yet uploaded', rep.localOnly.length, true) : ''}
       ${rep.queued ? row('Queued to send', rep.queued, true) : ''}
+      ${rep.rejected && rep.rejected.length ? row('Rejected', rep.rejected.length, true) : ''}
     </div>
+    ${rep.rejected && rep.rejected.length ? `<p class="admin-note warn"><b>Upload rejected</b> — ${
+      rep.rejected.length} ticket(s) the server will not accept:<br>${
+      rep.rejected.map(r => `<code>${r.ticket.id}</code> — ${r.reason}`).join('<br>')
+    }</p>` : ''}
     <p class="admin-note">${
       rep.error ? `Server unreadable: ${rep.error}`
       : rep.agrees ? 'This device matches the database.'
@@ -4523,6 +4544,34 @@ const Outbox = {
   clear() { Store.set(KEYS.outbox, []); renderSyncChip(); }
 };
 
+/* A ticket the server will never accept must leave the queue, or it blocks
+   everything behind it and retries forever. It is not discarded — it is set
+   aside with the reason, so the sync report can show it and a human can
+   decide. Silence is what made the original 400 so hard to find. */
+const DeadLetter = {
+  all() { return Store.get(KEYS.rejected, []) || []; },
+  count() { return this.all().length; },
+  add(entry, reason) {
+    const q = this.all();
+    if (q.some(x => x.ticket.id === entry.ticket.id)) return;
+    q.push({ ticket: entry.ticket, weekKey: entry.weekKey, reason,
+             rejectedAt: new Date().toISOString(), tries: entry.tries || 0 });
+    Store.set(KEYS.rejected, q);
+  },
+  clear() { Store.set(KEYS.rejected, []); }
+};
+
+/* Which failures are worth retrying? A dropped connection, yes. A row the
+   schema will refuse on every attempt, no. Getting this distinction wrong is
+   what turned one invalid ticket into an endless retry loop that also
+   declared a perfectly healthy server unreachable. */
+function isPermanentRejection(msg) {
+  return /stake must be at least|odds out of range|potential return must be positive/i.test(msg)
+      || /violates check constraint|23514|22P02|invalid input syntax/i.test(msg)
+      || /row-level security|42501|permission denied/i.test(msg)
+      || /null value in column|23502/i.test(msg);
+}
+
 /* A ticket placed while the app was in local mode — no Supabase keys, or
    keys that had been blanked — exists only in this browser. Once the cloud
    connects, syncFromCloud() replaces the ticket list with the server's, and
@@ -4573,6 +4622,26 @@ function localOnlyTickets(remote) {
   return out;
 }
 
+/* A bet can be on the server and still carry its VIG- placeholder id here,
+   if the swap after upload missed. It then reads as "never uploaded" forever
+   and keeps a stale outbox entry alive. Identity is the fingerprint, so adopt
+   the server's row wherever one matches and retire the queue entry. */
+function reconcileWithRemote(remote) {
+  const byFp = new Map();
+  (remote || []).forEach(r => byFp.set(ticketFingerprint(r), r));
+  let adopted = 0;
+  week.tickets.forEach((t, i) => {
+    if (!LOCAL_ID.test(String(t.id || ''))) return;
+    const hit = byFp.get(ticketFingerprint(t));
+    if (!hit) return;
+    week.tickets[i] = hit;                 // the server's row wins
+    Outbox.remove(t.id);                   // nothing left to send
+    adopted++;
+  });
+  if (adopted) { week.bankroll = derivedBankroll(week); persist(); renderSyncChip(); }
+  return adopted;
+}
+
 /* Collapse anything that slipped through, keeping the server's copy. */
 function dedupeTickets(list) {
   const byFp = new Map();
@@ -4619,13 +4688,18 @@ async function flushOutbox() {
   const queue = Outbox.all();
   if (!queue.length) return 0;
   flushing = true;
-  let sent = 0;
+  let sent = 0, rejected = 0;
   try {
     for (const entry of queue) {
       try {
         const saved = await Cloud.placeBet(entry.ticket, entry.weekKey);
-        /* swap the local placeholder for the row the database returned */
-        const i = week.tickets.findIndex(t => t.id === entry.ticket.id);
+        /* Swap the local placeholder for the row the database returned. Match
+           on fingerprint as well as id: the placeholder carries a VIG- id and
+           the saved row a uuid, and if the id lookup misses, the local copy
+           keeps its local id forever and reads as "never uploaded". */
+        const fp = ticketFingerprint(entry.ticket);
+        let i = week.tickets.findIndex(t => t.id === entry.ticket.id);
+        if (i < 0) i = week.tickets.findIndex(t => ticketFingerprint(t) === fp);
         if (i >= 0) week.tickets[i] = saved;
         Outbox.remove(entry.ticket.id);
         sent++;
@@ -4638,6 +4712,16 @@ async function flushOutbox() {
           Outbox.remove(entry.ticket.id);
           continue;
         }
+        /* Permanent: the row is wrong, not the connection. Set it aside with
+           the reason and keep going — one bad ticket must not hold up the
+           queue behind it, and it must not mark a healthy server down. */
+        if (isPermanentRejection(msg)) {
+          console.warn('[VIG] upload rejected permanently:', msg, entry.ticket);
+          DeadLetter.add(entry, msg);
+          Outbox.remove(entry.ticket.id);
+          rejected++;
+          continue;
+        }
         Outbox.bump(entry.ticket.id);
         Cloud.reachable = false;
         break;                        // server is down; stop hammering it
@@ -4645,6 +4729,7 @@ async function flushOutbox() {
     }
   } finally { flushing = false; }
   if (sent) { week.bankroll = derivedBankroll(week); persist(); }
+  if (rejected) renderSyncChip();
   return sent;
 }
 
@@ -5316,6 +5401,7 @@ window.VIG = {
                refreshAllTime, allTimeHtml, signedMoney, get boardScope() { return boardScope; },
                get authMode2() { return authMode2; }, set authMode2(v) { authMode2 = v; },
                Outbox, flushOutbox, renderSyncChip, migrateLocalTickets, localOnlyTickets,
+               DeadLetter, isPermanentRejection, reconcileWithRemote, ticketFingerprint,
                ticketFingerprint, dedupeTickets, renderBets, activeBetFilter, WEEKLY_BET_LIMIT, WEEKLY_BANKROLL, week, renderProfileCard, avatarOf, AVATAR_COLORS, renderHeaderAvatar, renderHomeGames,
                get cloudBoard() { return cloudBoard; },
                updateLifetime, AUTO_ROLLOVER, renderGolfEvent, renderAdmin,

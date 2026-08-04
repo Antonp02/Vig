@@ -108,6 +108,47 @@ Three ways to close it:
 
 ---
 
+## v1.6.6 — The outbox could hold a ticket forever
+
+**Fixed**
+
+- **One invalid ticket blocked the whole queue and declared a healthy server
+  down.** `flushOutbox()` treated every failure except a duplicate key as *"the
+  server is unreachable"* — it bumped the retry count, set
+  `Cloud.reachable = false`, and `break`ed. That was reasonable when the only
+  errors were network errors, but v1.6.5 added client-side validation, so
+  `placeBet()` now also throws for tickets that can **never** succeed. Such a
+  ticket became a poison message: retried on every flush, forever, blocking
+  everything queued behind it.
+
+  Failures are now classified. A dropped connection is retried. A row the schema
+  will refuse on every attempt — bad stake, bad odds, check-constraint or RLS
+  violation, missing not-null column — is moved to a **dead-letter store** with
+  its reason, removed from the queue, and surfaced in the sync report as
+  **Rejected**. It is set aside, never discarded, and the queue behind it drains.
+
+- **A bet could be on the server and still read as "never uploaded" here.**
+  After a successful upload the local placeholder is replaced by the row the
+  database returned, matched by id. If that lookup missed, the local copy kept
+  its `VIG-` id permanently and its outbox entry stayed alive — which is exactly
+  the "1 queued, 1 not yet uploaded" state seen against a database that already
+  had the bet. Identity now comes from the ticket fingerprint as well as the id,
+  and `reconcileWithRemote()` adopts the server's row for any local placeholder
+  that matches, retiring the stale queue entry.
+
+- **"This device matches the database" ignored the outbox.** `agrees` compared
+  ticket counts and bankroll only, so it could report a match while work was
+  still outstanding. It now also requires zero queued, zero local-only, and zero
+  rejected. A healthy report after Force resync is **0 and 0**.
+
+**Notes**
+- 30 new assertions covering the permanent-versus-retryable distinction, a
+  poison ticket not blocking the queue behind it, adoption of a server row held
+  under a local id, and the report refusing to claim a match while anything is
+  outstanding. 100 assertions total.
+
+---
+
 ## v1.6.5 — Bet lifecycle rebuilt on sportsbook accounting
 
 The `bets_potential_return_check` failure was the symptom. The cause was a
