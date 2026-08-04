@@ -67,6 +67,14 @@ alter table public.bets add column if not exists book_prices jsonb;
 alter table public.bets add column if not exists close_prob  numeric(6,4);
 create index if not exists bets_user_week on public.bets (user_id, week_key);
 create index if not exists bets_week      on public.bets (week_key);
+
+-- The same user cannot hold two identical bets in the same week. Client
+-- code deduplicates by content too, but a database constraint is the only
+-- thing that makes it impossible rather than unlikely.
+create unique index if not exists bets_no_duplicates
+  on public.bets (user_id, week_key, kind,
+                  coalesce(event_id,''), coalesce(selection_id,''),
+                  stake, odds, md5(coalesce(legs::text,'')));
 create index if not exists bets_event     on public.bets (event_id) where event_id is not null;
 
 -- ---------- events ----------

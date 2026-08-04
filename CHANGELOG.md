@@ -108,6 +108,82 @@ Three ways to close it:
 
 ---
 
+## v1.6.4 — All-time leaderboard
+
+**Added**
+- **All-time standings**, toggled beside the weekly board. The weekly table
+  answers "who is winning right now"; this answers "who is actually good", which
+  is the more interesting question once more than one week exists — a bad week
+  resets, a bad record does not.
+
+  Per player: lifetime profit, ROI, W-L-P record, bets placed, weeks played, and
+  **average CLV** where there is a closing line to compare against. Medals for
+  the top three, your own row highlighted.
+
+  The `lifetime()` function has been in the schema since v1.5.0 and nothing was
+  reading it. No migration needed.
+
+- Players with no settled bets are held back until they have one, so the board
+  is not padded with zeroes.
+
+**Fixed**
+- `money(-85)` renders as `$-85.00`, which reads as a typo. Signed amounts now
+  put the sign outside the symbol: **−$85.00**.
+- Switching to the all-time board while signed out left the weekly demo rows on
+  screen — `refreshAllTime()` returned early without repainting.
+
+**Notes**
+- The generated demo rivals correctly stepped aside once real leaderboard reads
+  started working in v1.6.2. With one signed-up user the board shows one row,
+  which is right — everyone who signs up appears from their first settled bet.
+- CLV on this board is the reason v1.5.2 captured `fair_prob` on every bet.
+  It stays blank until a closing line exists to compare against.
+
+---
+
+## v1.6.3 — Duplicate bets
+
+**Fixed**
+- **Force resync uploaded a bet that was already there**, creating a second copy
+  and taking its stake off the bankroll twice. Reported as "$773 → $748 and a
+  6th ticket appeared" — exactly one $25 parlay counted twice.
+
+  The migration decided what was local-only by matching **ids**, and one bet can
+  carry two: a `VIG-` id created on the device and the uuid the database assigns.
+  Id-matching cannot tell those are the same bet.
+
+  Identity now comes from the bet's **content** — kind, event, selection, stake,
+  odds and a sorted hash of the legs. A bet uploaded under any id is recognised
+  as already present. Leg order does not matter.
+
+- `Outbox.add()` also deduplicates by content, so the same bet cannot be queued
+  twice under different ids.
+- A duplicate rejected by the database is now treated as **success** — the bet is
+  already there — rather than a failure retried forever.
+
+**Migration**
+
+Run **`v1.6.3-dedupe.sql`**. Three steps, and it is written to be read before it
+is run:
+
+1. **Look** — lists the duplicate rows without touching anything
+2. **Remove** — deletes every copy after the first
+3. **Prevent** — a unique index so the database refuses duplicates regardless of
+   what any client does
+
+The index hashes `legs` rather than using `title`: title is *derived* from the
+legs by the client, so indexing on it would silently stop catching duplicates the
+day that derivation changed.
+
+**Notes**
+- Client-side deduplication is the first line; the index is the backstop. Both,
+  because "unlikely" and "impossible" are different guarantees and this bug cost
+  real money on a real bankroll.
+- 13 new assertions, including the exact scenario: a bet present under a uuid on
+  the server and a `VIG-` id locally is *not* re-uploaded.
+
+---
+
 ## v1.6.2 — Missing table grants
 
 **Fixed**

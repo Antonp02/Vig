@@ -6,7 +6,7 @@
 
 /* Build stamp. Every "is this device on the new code?" question has cost a
    round trip; now it is on screen. Bumped with the service worker cache. */
-const VIG_BUILD = 'v1.6.2';
+const VIG_BUILD = 'v1.6.4';
 
 /* ---------- 0. Persistence ---------- */
 const KEYS = {
@@ -1554,6 +1554,80 @@ function standings() {
   return [...rivalsForWeek(week.key), me].sort((a, b) => b.profit - a.profit);
 }
 
+/* ---------- all-time leaderboard ---------------------------------
+   The weekly board answers "who is winning right now". This answers
+   "who is actually good", which is the more interesting question once
+   more than one week has been played — a bad week resets, a bad record
+   does not. The `lifetime()` function has existed since v1.5.0; nothing
+   was reading it.
+------------------------------------------------------------------ */
+let boardScope = 'week';       // 'week' | 'alltime'
+let allTimeRows = null;
+
+async function refreshAllTime() {
+  if (!(Cloud.enabled() && Cloud.signedIn())) {
+    allTimeRows = null;
+    renderCompetition();          // was returning without repainting
+    return;
+  }
+  try {
+    const rows = await Cloud.lifetime();
+    allTimeRows = (rows || []).map(r => ({
+      userId: r.user_id,
+      name: r.display_name,
+      you: r.user_id === Cloud.userId(),
+      bets: Number(r.bets) || 0,
+      wins: Number(r.wins) || 0,
+      losses: Number(r.losses) || 0,
+      pushes: Number(r.pushes) || 0,
+      wagered: Number(r.wagered) || 0,
+      profit: Number(r.profit) || 0,
+      roi: r.roi === null || r.roi === undefined ? null : Number(r.roi),
+      biggestWin: Number(r.biggest_win) || 0,
+      weeks: Number(r.weeks_played) || 0,
+      clv: r.clv === null || r.clv === undefined ? null : Number(r.clv),
+      clvBets: Number(r.clv_bets) || 0
+    })).sort((a, b) => b.profit - a.profit);
+  } catch (e) {
+    console.warn('[VIG] all-time read failed:', e && e.message);
+    allTimeRows = null;
+  }
+  renderCompetition();
+}
+
+function allTimeHtml() {
+  if (!allTimeRows) {
+    return `<div class="empty-state">${Cloud.enabled()
+      ? 'Sign in to see the all-time board.'
+      : 'All-time standings need an account.'}</div>`;
+  }
+  const played = allTimeRows.filter(r => r.bets > 0);
+  if (!played.length) {
+    return '<div class="empty-state">No settled bets yet. The all-time board fills in as weeks complete.</div>';
+  }
+  const medal = i => i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`;
+  return played.map((r, i) => {
+    const rec = `${r.wins}-${r.losses}${r.pushes ? `-${r.pushes}` : ''}`;
+    return `<div class="leader-row alltime${r.you ? ' you' : ''}">
+      <div class="rank">${medal(i)}</div>
+      <div>
+        <strong>${r.name}${r.you ? ' <i class="you-tag">you</i>' : ''}</strong>
+        <small>${rec} · ${r.bets} bet${r.bets === 1 ? '' : 's'} · ${r.weeks} week${r.weeks === 1 ? '' : 's'}${
+          r.clv !== null && r.clvBets ? ` · <b class="${r.clv >= 0 ? 'positive' : 'negative'}">${r.clv >= 0 ? '+' : ''}${r.clv.toFixed(1)} CLV</b>` : ''}</small>
+      </div>
+      <div class="profit ${r.profit >= 0 ? '' : 'negative'}">${signedMoney(r.profit)}</div>
+      <div class="tickets">${r.roi === null ? '—' : `${r.roi >= 0 ? '+' : ''}${r.roi.toFixed(0)}% ROI`}</div>
+    </div>`;
+  }).join('');
+}
+
+/* money(-85) gives "$-85.00", which reads as a typo. Signed amounts belong
+   outside the symbol. */
+function signedMoney(n) {
+  const v = Number(n) || 0;
+  return `${v < 0 ? '-' : '+'}${money(Math.abs(v))}`;
+}
+
 function renderCompetition() {
   const rows = standings();
   const table = rows.map((r, i) => `
@@ -1565,6 +1639,21 @@ function renderCompetition() {
     </div>`).join('');
 
   const lb = document.getElementById('leaderboardList');
+  document.querySelectorAll('[data-board-scope]').forEach(b =>
+    b.classList.toggle('active', b.dataset.boardScope === boardScope));
+  if (boardScope === 'alltime') {
+    if (lb) lb.innerHTML = allTimeHtml();
+    const note = document.getElementById('leaderboardNote');
+    if (note) {
+      note.hidden = !!allTimeRows;
+      note.textContent = 'All-time standings need an account.';
+    }
+    const champ = document.getElementById('weekChampion');
+    if (champ) champ.hidden = true;
+    return;
+  }
+  const champShow = document.getElementById('weekChampion');
+  if (champShow) champShow.hidden = false;
   if (lb) lb.innerHTML = table;
   const fr = document.getElementById('friendsRanking');
   if (fr) fr.innerHTML = table;
@@ -2532,7 +2621,7 @@ async function refreshTickets({ quiet = false } = {}) {
   remote.forEach(t => (byId[t.id] = t));
   const changed = [];
   migrateLocalTickets(remote);
-  week.tickets = week.tickets.map(local => {
+  week.tickets = dedupeTickets(week.tickets).map(local => {
     const r = byId[local.id];
     if (!r) return local;                       // queued locally, not yet sent
     if (r.status !== local.status || r.closeProb !== local.closeProb) changed.push(r);
@@ -2753,6 +2842,11 @@ function wireUp() {
     b.classList.add('active');
     renderMarkets(b.dataset.filter);
   });
+  document.querySelectorAll('[data-board-scope]').forEach(b => b.onclick = () => {
+    boardScope = b.dataset.boardScope;
+    if (boardScope === 'alltime' && !allTimeRows) refreshAllTime();
+    else renderCompetition();
+  });
   document.querySelectorAll('.bet-filter').forEach(b => b.onclick = () => {
     document.querySelectorAll('.bet-filter').forEach(x => x.classList.remove('active'));
     b.classList.add('active');
@@ -2960,7 +3054,7 @@ function boot() {
       renderProfileCard();
       renderIdentityGate();
       renderAdmin();
-      if (ok && Cloud.signedIn()) { syncFromCloud(); refreshLeaderboard(); }
+      if (ok && Cloud.signedIn()) { syncFromCloud(); refreshLeaderboard(); refreshAllTime(); }
     });
   });
   safely('identity', renderIdentityGate);
@@ -3795,6 +3889,7 @@ async function settleAndSync(winnerId, { push = false } = {}) {
                          settledAt: new Date().toISOString() });
     await syncFromCloud();                 // re-read rather than assume
     await refreshLeaderboard();
+    refreshAllTime();
     renderGolfEvent(); renderAdmin();
     showToast(res.settled
       ? `Settled ${res.settled} for everyone · ${res.winners} won · ${money(res.paid)} paid.`
@@ -4402,7 +4497,8 @@ const Outbox = {
   count() { return this.all().length; },
   add(ticket, weekKey) {
     const q = this.all();
-    if (q.some(x => x.ticket.id === ticket.id)) return;
+    const fp = ticketFingerprint(ticket);
+    if (q.some(x => x.ticket.id === ticket.id || ticketFingerprint(x.ticket) === fp)) return;
     q.push({ ticket, weekKey, queuedAt: new Date().toISOString(), tries: 0 });
     Store.set(KEYS.outbox, q);
     renderSyncChip();
@@ -4430,11 +4526,59 @@ const Outbox = {
    VIG- prefix, so the two are trivially distinguishable. */
 const LOCAL_ID = /^VIG-/;
 
+/* Matching on id alone was not enough. The SAME bet can exist under two
+   different ids — a VIG- one created locally and a uuid assigned by the
+   database — so a bet that had already been uploaded looked local-only and
+   was uploaded a second time. That is how a $25 parlay became two $25
+   parlays and quietly took $25 off the bankroll.
+
+   Identity has to come from the bet's CONTENT, not from whichever id
+   happens to be attached to it. */
+function ticketFingerprint(t) {
+  if (!t) return '';
+  const legs = (t.legs || [])
+    .map(l => `${(l.title || '').trim()}@${l.odds}`)
+    .sort()
+    .join('|');
+  return [
+    t.kind || 'parlay',
+    t.eventId || '',
+    t.selectionId || '',
+    Number(t.stake).toFixed(2),
+    Number(t.odds),
+    legs
+  ].join('~');
+}
+
 function localOnlyTickets(remote) {
-  const remoteIds = new Set((remote || []).map(t => t.id));
-  const queued = new Set(Outbox.all().map(x => x.ticket.id));
-  return week.tickets.filter(t =>
-    LOCAL_ID.test(String(t.id || '')) && !remoteIds.has(t.id) && !queued.has(t.id));
+  const seen = new Set((remote || []).map(ticketFingerprint));
+  const queued = new Set(Outbox.all().map(x => ticketFingerprint(x.ticket)));
+  const out = [];
+  const mine = new Set();
+  week.tickets.forEach(t => {
+    if (!LOCAL_ID.test(String(t.id || ''))) return;   // already a server row
+    const fp = ticketFingerprint(t);
+    if (seen.has(fp) || queued.has(fp) || mine.has(fp)) return;
+    mine.add(fp);                                     // and never twice in one pass
+    out.push(t);
+  });
+  return out;
+}
+
+/* Collapse anything that slipped through, keeping the server's copy. */
+function dedupeTickets(list) {
+  const byFp = new Map();
+  (list || []).forEach(t => {
+    const fp = ticketFingerprint(t);
+    const prev = byFp.get(fp);
+    if (!prev) { byFp.set(fp, t); return; }
+    /* prefer the row that lives in the database, then the graded one */
+    const prevLocal = LOCAL_ID.test(String(prev.id || ''));
+    const thisLocal = LOCAL_ID.test(String(t.id || ''));
+    if (prevLocal && !thisLocal) byFp.set(fp, t);
+    else if (prevLocal === thisLocal && prev.status === 'open' && t.status !== 'open') byFp.set(fp, t);
+  });
+  return [...byFp.values()];
 }
 
 /* Upload them rather than discarding them. RLS only accepts an insert with
@@ -4470,6 +4614,14 @@ async function flushOutbox() {
         Outbox.remove(entry.ticket.id);
         sent++;
       } catch (e) {
+        const msg = (e && e.message) || '';
+        /* The database refusing a duplicate means the bet is already
+           there — that is a success for our purposes, not a failure to
+           retry forever. */
+        if (/duplicate key|bets_no_duplicates|23505/i.test(msg)) {
+          Outbox.remove(entry.ticket.id);
+          continue;
+        }
         Outbox.bump(entry.ticket.id);
         Cloud.reachable = false;
         break;                        // server is down; stop hammering it
@@ -4858,8 +5010,9 @@ async function syncFromCloud() {
       showToast(`${rescued} bet${rescued === 1 ? '' : 's'} from this device uploaded to your account.`);
     }
     const pending = Outbox.all().map(x => x.ticket);
-    const remoteIds = new Set(remote.map(t => t.id));
-    week.tickets = remote.concat(pending.filter(t => !remoteIds.has(t.id)));
+    const remoteFps = new Set(remote.map(ticketFingerprint));
+    week.tickets = dedupeTickets(
+      remote.concat(pending.filter(t => !remoteFps.has(ticketFingerprint(t)))));
     week.bankroll = derivedBankroll(week);
     persist();
     updateDashboard();
@@ -5068,8 +5221,10 @@ window.VIG = {
                decimalOdds, americanFromDecimal, impliedProb, round2, fmtOdds, combinedAmerican, devigPair,
                devigProportional, devigPower, fairProbability, DEVIG_METHOD, round4, needsAccount, needsProfile, openAuth,
                refreshLeaderboard, syncFromCloud, AUTH_GATED_VIEWS, cloudUnreachable,
+               refreshAllTime, allTimeHtml, signedMoney, get boardScope() { return boardScope; },
                get authMode2() { return authMode2; }, set authMode2(v) { authMode2 = v; },
-               Outbox, flushOutbox, renderSyncChip, migrateLocalTickets, localOnlyTickets, renderBets, activeBetFilter, WEEKLY_BET_LIMIT, WEEKLY_BANKROLL, week, renderProfileCard, avatarOf, AVATAR_COLORS, renderHeaderAvatar, renderHomeGames,
+               Outbox, flushOutbox, renderSyncChip, migrateLocalTickets, localOnlyTickets,
+               ticketFingerprint, dedupeTickets, renderBets, activeBetFilter, WEEKLY_BET_LIMIT, WEEKLY_BANKROLL, week, renderProfileCard, avatarOf, AVATAR_COLORS, renderHeaderAvatar, renderHomeGames,
                get cloudBoard() { return cloudBoard; },
                updateLifetime, AUTO_ROLLOVER, renderGolfEvent, renderAdmin,
                ROSTER_SLOTS, DRAFT_ROUNDS, assignSlot, ordinal, buildDraftPool,

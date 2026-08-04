@@ -773,3 +773,18 @@ button,select,input,a{touch-action:manipulation}
 .sr-row.warn strong{color:var(--gold)}
 .build-stamp{margin:8px 4px 0;color:var(--muted);font-size:10px;text-align:center;letter-spacing:.05em}
 @media(max-width:700px){.sync-report{grid-template-columns:1fr}}
+
+/* ===================== v1.6.4 — all-time leaderboard ===================== */
+.board-scope{display:flex;gap:6px;margin-bottom:12px}
+.leader-row.alltime{grid-template-columns:52px 1fr auto 96px}
+.leader-row.you{background:var(--accent-dark);border-radius:10px}
+.you-tag{font-style:normal;font-size:9px;font-weight:800;margin-left:6px;padding:2px 6px;
+  border-radius:999px;background:var(--accent);color:#08101a}
+.leader-row .profit.negative{color:var(--red)}
+.leader-row.alltime .rank{font-size:16px}
+.leader-row.alltime small b{font-weight:800}
+@media(max-width:700px){
+  .leader-row.alltime{grid-template-columns:40px 1fr auto}
+  .leader-row.alltime .tickets{display:none}
+  .board-scope .line-range-btn{flex:1;min-height:40px}
+}
