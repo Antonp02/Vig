@@ -43,6 +43,10 @@ create table if not exists public.bets (
   title            text not null,
   stake            numeric(10,2) not null check (stake >= 1),
   odds             integer not null check (abs(odds) >= 100),
+  -- What the ticket WOULD pay: stake x decimal odds, fixed at placement.
+  -- Immutable thereafter (see bets_guard). What it DID pay is derived from
+  -- status by public.bet_payout() and is never stored -- a stored payout is
+  -- a second source of truth, and second sources drift.
   potential_return numeric(10,2) not null check (potential_return > 0),
   status           text not null default 'open'
                      check (status in ('open','won','lost','push','void')),
@@ -418,3 +422,12 @@ language sql stable security definer set search_path = public as $$
          (select count(*)::int from public.bets where status = 'open');
 $$;
 grant execute on function public.admin_stats() to authenticated;
+
+
+-- ============================================================
+-- v1.6.5 lifecycle rules live in supabase/migrations/
+--   2026-08-04_v1.6.5_lifecycle.sql
+-- Run it after this file on a fresh install. It adds the derived payout
+-- function, the immutability and transition guard, and the settled_at
+-- invariant. See docs/SPORTSBOOK_MODEL.md for the reasoning.
+-- ============================================================

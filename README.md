@@ -191,3 +191,14 @@ See V1.0-NOTES.md.
 
 Player statistics from nflverse (CC-BY 4.0) — the footer credit is a license
 condition, not a courtesy.
+
+## Architecture
+
+The accounting model — bankroll lifecycle, bet lifecycle, settlement, weekly
+reset, sync — is documented in [`docs/SPORTSBOOK_MODEL.md`](docs/SPORTSBOOK_MODEL.md).
+Read it before changing anything that touches money.
+
+```
+npm install     # jsdom, for the test harness
+npm test        # builds the preview, runs every suite
+```

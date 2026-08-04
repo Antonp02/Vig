@@ -268,7 +268,7 @@ function weekStats(w) {
   /* push and void both return the stake untouched, so neither belongs in
      profit, hit rate or amount risked */
   const voided = t.filter(x => x.status === 'void' || x.status === 'push');
-  const returned = graded.reduce((a, x) => a + (x.status === 'won' ? x.returnAmount : 0), 0);
+  const returned = graded.reduce((a, x) => a + realizedReturn(x), 0);
   const gradedStake = graded.reduce((a, x) => a + x.stake, 0);
   const wins = graded.filter(x => x.status === 'won').length;
   return {
@@ -575,6 +575,10 @@ let snapshots = Store.get(KEYS.snapshots, []);
 let savedDrafts = Store.get(KEYS.drafts, []);
 let weekResults = Store.get(KEYS.results, []);
 let week = Store.get(KEYS.week, null);
+/* v1.6.5: a loser settled by an earlier build had its projection overwritten
+   with zero. Rebuild it from the price so history reads correctly and the row
+   can be uploaded. */
+if (week && repairTickets(week)) Store.set(KEYS.week, week);
 let draftState = null, replayTimer = null, countdownTimer = null, lastResult = null;
 let chartMode = 'teams';                 // 'teams' | 'books'
 let selectedLineTeams = [];              // teams mode, up to 4
@@ -620,7 +624,7 @@ function updateLifetime(w) {
   lt.profit  = round2(lt.profit + s.realizedPL);
   lt.weeks  += 1;
   const best = w.tickets.filter(t => t.status === 'won')
-    .reduce((m, t) => Math.max(m, t.returnAmount - t.stake), 0);
+    .reduce((m, t) => Math.max(m, payout(t) - t.stake), 0);
   lt.biggestWin = round2(Math.max(lt.biggestWin, best));
   lt.bestFinish = round2(Math.max(lt.bestFinish, s.bankroll));
   Store.set(KEYS.lifetime, lt);
@@ -632,19 +636,19 @@ function archiveWeek(w) {
      the stake and mark it void. Previously the stake was debited and the
      ticket orphaned, so the money simply disappeared from the archive. */
   w.tickets.filter(t => t.status === 'open').forEach(t => {
-    t.status = 'void';
-    t.returnAmount = t.stake;
-    w.bankroll = round2(w.bankroll + t.stake);
+    t.status = 'void';                    // payout() refunds the stake
+    t.settledAt = t.settledAt || new Date().toISOString();
   });
+  w.bankroll = derivedBankroll(w);
   const s = weekStats(w);
   const best = w.tickets
     .filter(t => t.status === 'won')
-    .sort((a, b) => (b.returnAmount - b.stake) - (a.returnAmount - a.stake))[0];
+    .sort((a, b) => (payout(b) - b.stake) - (payout(a) - a.stake))[0];
   updateLifetime(w);
   weekResults.unshift({
     key: w.key, profit: s.realizedPL, hitRate: s.hitRate, betsUsed: s.betsUsed,
     roi: s.roi, wagered: s.wagered,
-    bestTicket: best ? { legs: best.legs.length, odds: best.odds, profit: round2(best.returnAmount - best.stake) } : null
+    bestTicket: best ? { legs: best.legs.length, odds: best.odds, profit: round2(payout(best) - best.stake) } : null
   });
   if (weekResults.length > 12) weekResults.pop();
   Store.set(KEYS.results, weekResults);
@@ -942,9 +946,12 @@ function settleOpenTickets() {
   open.forEach(t => {
     const won = t.legs.every(l => Math.random() < legWinProbability(l));
     t.status = won ? 'won' : 'lost';
-    if (won) { week.bankroll = round2(week.bankroll + t.returnAmount); credited += t.returnAmount; }
-    else t.returnAmount = 0;
+    t.settledAt = new Date().toISOString();
+    /* returnAmount is NOT touched. A loser keeps what it would have paid;
+       payout() reports 0 because the status says so. */
+    credited += realizedReturn(t);
   });
+  week.bankroll = derivedBankroll(week);
   week.history.push(round2(week.bankroll));
   if (week.history.length > 40) week.history.shift();
   persist();
@@ -1026,7 +1033,7 @@ function renderBets(status = 'all') {
       <ol class="bet-legs">${t.legs.map(l => `<li>${l.title}${validOdds(l.odds) ? ` <span class="odds">${fmtOdds(l.odds)}</span>` : ''}</li>`).join('')}</ol>
       <div class="bet-card-foot">
         <div><span>Stake</span><strong>${money(t.stake)}</strong></div>
-        <div><span>${t.status === 'won' ? 'Paid' : t.status === 'lost' ? 'Return' : (t.status === 'void' || t.status === 'push') ? 'Refunded' : 'To win'}</span><strong>${money(t.returnAmount)}</strong></div>
+        <div><span>${t.status === 'won' ? 'Paid' : t.status === 'lost' ? 'Returned' : (t.status === 'void' || t.status === 'push') ? 'Refunded' : 'To win'}</span><strong>${money(t.status === 'open' ? potentialReturn(t) : payout(t))}</strong>${t.status === 'lost' ? `<small class="would-have-paid">would have paid ${money(potentialReturn(t))}</small>` : ''}</div>
         ${typeof t.fairProb === 'number' ? `<div><span>Market at entry</span><strong>${(t.fairProb * 100).toFixed(1)}%${
           typeof t.closeProb === 'number'
             ? ` <em class="clv ${t.closeProb > t.fairProb ? 'good' : 'bad'}">${t.closeProb > t.fairProb ? '+' : ''}${((t.closeProb - t.fairProb) * 100).toFixed(1)} CLV</em>`
@@ -1547,7 +1554,7 @@ function standings() {
     hitRate: s.hitRate, bankroll: s.bankroll,
     best: (() => {
       const b = week.tickets.filter(t => t.status === 'won')
-        .sort((a, c) => (c.returnAmount - c.stake) - (a.returnAmount - a.stake))[0];
+        .sort((a, c) => (payout(c) - c.stake) - (payout(a) - a.stake))[0];
       return b ? { legs: b.legs.length, odds: b.odds } : null;
     })()
   };
@@ -3667,7 +3674,7 @@ function renderGolfEvent() {
     ${(() => {
       const pend = pendingSettlement();
       if (!pend.length) return '';
-      const owed = pend.reduce((a, t) => a + (t.selectionId === (GolfEvent.state().winner) ? t.returnAmount : 0), 0);
+      const owed = pend.reduce((a, t) => a + (t.selectionId === (GolfEvent.state().winner) ? potentialReturn(t) : 0), 0);
       return `<div class="settle-pending">
         <strong>${pend.length} ticket${pend.length === 1 ? '' : 's'} awaiting settlement.</strong>
         The tournament is final${owed ? `, and ${money(owed)} is owed to you` : ''}, but bets are graded
@@ -3823,17 +3830,13 @@ function settleGolfEvent(winnerId, { push = false } = {}) {
   if (!open.length) return { settled: 0, paid: 0 };
   let paid = 0;
   open.forEach(t => {
-    if (push) {
-      t.status = 'push';
-      t.returnAmount = t.stake;                 // stake back, no profit
-      paid += t.stake;
-    } else if (t.selectionId === winnerId) {
-      t.status = 'won';                          // stake + profit returned
-      paid += t.returnAmount;
-    } else {
-      t.status = 'lost';                         // stake already deducted
-      t.returnAmount = 0;
-    }
+    /* status is the only thing settlement writes. Every payout follows
+       from it, so these three branches can no longer disagree with the
+       money. */
+    if (push) t.status = 'push';
+    else if (t.selectionId === winnerId) t.status = 'won';
+    else t.status = 'lost';
+    paid += realizedReturn(t);
     t.settledAt = new Date().toISOString();
   });
   week.bankroll = derivedBankroll(week);
@@ -4156,13 +4159,15 @@ function renderAdmin() {
       return;
     }
     let reversed = 0;
+    /* Reversing is now only a status change. Nothing to recompute, because
+       nothing was destroyed; nothing to subtract, because the bankroll is
+       derived from the ledger rather than accumulated into. */
     golfTickets().filter(t => t.settledAt).forEach(t => {
-      if (t.status === 'won' || t.status === 'push') week.bankroll = round2(week.bankroll - t.returnAmount);
-      if (t.status === 'lost') t.returnAmount = round2(t.stake * decimalOdds(t.odds));
       t.status = 'open';
       delete t.settledAt;
       reversed++;
     });
+    week.bankroll = derivedBankroll(week);
     GolfEvent.setState({ status: 'open', winner: null, settledAt: null });
     persist();
     rerender();
@@ -4382,6 +4387,9 @@ const Cloud = {
   },
 
   async placeBet(ticket, weekKey) {
+    /* Malformed before unauthenticated: a bad ticket is bad regardless of
+       session, and this is the clearer error of the two. */
+    validateTicketForUpload(ticket);
     if (!this.signedIn()) throw new Error('Not signed in');
     const row = {
       user_id: this.userId(),
@@ -4395,7 +4403,7 @@ const Cloud = {
         : 'Mock bet',
       stake: ticket.stake,
       odds: ticket.odds,
-      potential_return: ticket.returnAmount,
+      potential_return: potentialReturn(ticket),
       legs: ticket.legs || null,
       fair_prob: (typeof ticket.fairProb === 'number') ? ticket.fairProb : null,
       fair_method: ticket.fairMethod || null,
@@ -4588,7 +4596,15 @@ function dedupeTickets(list) {
 function migrateLocalTickets(remote) {
   const orphans = localOnlyTickets(remote);
   if (!orphans.length) return 0;
-  orphans.forEach(t => Outbox.add(Object.assign({}, t, { status: 'open' }), week.key));
+  /* Uploaded as 'open' because RLS refuses a self-declared winner; the admin
+     settling the event grades it. Since v1.6.5 the projection survives
+     settlement untouched, so re-opening no longer has to reconstruct
+     anything — the row is valid the moment its status changes. */
+  orphans.forEach(t => {
+    const reopened = Object.assign({}, t, { status: 'open', returnAmount: potentialReturn(t) });
+    delete reopened.settledAt;
+    Outbox.add(reopened, week.key);
+  });
   console.warn(`[VIG] ${orphans.length} local-only ticket(s) queued for upload`);
   return orphans.length;
 }
@@ -4673,7 +4689,14 @@ function rowToTicket(r) {
     status: r.status || 'open',
     stake: num(r.stake, 0),
     odds: num(r.odds, 100),
-    returnAmount: num(r.potential_return, 0),
+    /* rows written before v1.6.5 may carry a zeroed projection; rebuild it
+       from the price rather than trusting the stored figure */
+    returnAmount: (function () {
+      const stored = num(r.potential_return, 0);
+      if (stored > 0) return stored;
+      const stake = num(r.stake, 0), odds = num(r.odds, 0);
+      return (stake > 0 && validOdds(odds)) ? round2(stake * decimalOdds(odds)) : 0;
+    })(),
     settledAt: r.settled_at || undefined,
     fairProb: (r.fair_prob === null || r.fair_prob === undefined) ? null : num(r.fair_prob, null),
     fairMethod: r.fair_method || null,
@@ -4684,6 +4707,76 @@ function rowToTicket(r) {
   };
 }
 
+/* ============================================================
+   THE ACCOUNTING MODEL (v1.6.5). Two different numbers that were
+   previously one field:
+
+     potentialReturn(t)  what the ticket WOULD pay. Fixed at placement
+                         from stake x odds. Never changes again, for any
+                         reason, in any status. Stored as `returnAmount`
+                         locally and `potential_return` in Postgres.
+
+     payout(t)           what the ticket DID pay. A pure function of
+                         status — derived, never stored, so it cannot
+                         drift the way a cached number can:
+                           open        -> null   (undecided)
+                           won         -> potential
+                           lost        -> 0
+                           push, void  -> stake  (refund, no profit)
+
+   The stake leaves the bankroll at placement and only ever comes back
+   through payout(). A loser therefore keeps its potential return on
+   record and still pays nothing, which is how a book actually works —
+   and it stops the migration path from producing rows that violate
+   `potential_return > 0`.
+   ============================================================ */
+function potentialReturn(t) {
+  const v = Number(t && t.returnAmount);
+  if (isFinite(v) && v > 0) return round2(v);
+  /* legacy row written before v1.6.5, when settling a loser overwrote the
+     projection with zero. Recover it from the price, which never changed. */
+  const stake = Number(t && t.stake), odds = Number(t && t.odds);
+  if (isFinite(stake) && stake > 0 && validOdds(odds)) return round2(stake * decimalOdds(odds));
+  return 0;
+}
+
+/* Mirror of the schema's own CHECK constraints, applied before we spend a
+   round trip. A 400 from PostgREST is opaque to the user and, before
+   v1.6.5, was swallowed and retried forever. */
+function validateTicketForUpload(ticket) {
+  const stake = Number(ticket && ticket.stake), odds = Number(ticket && ticket.odds);
+  const pot = potentialReturn(ticket);
+  if (!(stake >= 1)) throw new Error(`stake must be at least $1 (got ${ticket && ticket.stake})`);
+  if (!validOdds(odds)) throw new Error(`odds out of range: ${ticket && ticket.odds} (must be <= -100 or >= +100)`);
+  if (!(pot > 0)) throw new Error(`potential return must be positive (got ${pot})`);
+  return pot;
+}
+
+function payout(t) {
+  if (!t) return 0;
+  switch (t.status) {
+    case 'won':  return potentialReturn(t);
+    case 'lost': return 0;
+    case 'push':
+    case 'void': return round2(Number(t.stake) || 0);
+    default:     return null;               // still open — nothing settled
+  }
+}
+
+/* What a ticket has actually returned to the bankroll so far. An open
+   ticket has returned nothing; its stake is still at risk. */
+function realizedReturn(t) { const p = payout(t); return p === null ? 0 : p; }
+
+/* Repair tickets written by an older version. Idempotent. */
+function repairTickets(w) {
+  let fixed = 0;
+  ((w && w.tickets) || []).forEach(t => {
+    const p = potentialReturn(t);
+    if (p > 0 && Number(t.returnAmount) !== p) { t.returnAmount = p; fixed++; }
+  });
+  return fixed;
+}
+
 /* Bankroll is a function of the bets, never a stored number. Works
    identically local or remote, and cannot drift out of step with the
    ticket list. */
@@ -4691,9 +4784,7 @@ function derivedBankroll(w) {
   const t = (w && w.tickets) || [];
   const n = v => { const x = Number(v); return isFinite(x) ? x : 0; };
   const staked = t.reduce((a, x) => a + n(x.stake), 0);
-  const returned = t.reduce((a, x) =>
-    a + (x.status === 'won' ? n(x.returnAmount)
-       : (x.status === 'push' || x.status === 'void') ? n(x.stake) : 0), 0);
+  const returned = t.reduce((a, x) => a + n(realizedReturn(x)), 0);
   const out = round2(WEEKLY_BANKROLL - staked + returned);
   /* last line of defence — a bankroll of NaN is worse than a wrong one */
   return isFinite(out) ? out : WEEKLY_BANKROLL;
@@ -5218,6 +5309,7 @@ window.VIG = {
                get bootErrors() { return bootErrors; }, tzParts, weekKeyFor, nextResetAt, RESET_TZ, RESET_HOUR,
                GolfEvent, Admin, settleGolfEvent, settleAndSync, golfLeaderboardHtml, autoSettleFromEventData, pendingSettlement, golfTickets, getIdentity, saveIdentity, archiveWeek, blankWeek,
                Cloud, derivedBankroll, requireAccount,
+               payout, potentialReturn, realizedReturn, repairTickets, validateTicketForUpload, settleOpenTickets, updateLifetime,
                decimalOdds, americanFromDecimal, impliedProb, round2, fmtOdds, combinedAmerican, devigPair,
                devigProportional, devigPower, fairProbability, DEVIG_METHOD, round4, needsAccount, needsProfile, openAuth,
                refreshLeaderboard, syncFromCloud, AUTH_GATED_VIEWS, cloudUnreachable,

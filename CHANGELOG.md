@@ -108,6 +108,77 @@ Three ways to close it:
 
 ---
 
+## v1.6.5 — Bet lifecycle rebuilt on sportsbook accounting
+
+The `bets_potential_return_check` failure was the symptom. The cause was a
+modelling error, so this release fixes the model rather than the constraint.
+
+**The change**
+
+One field, `potential_return`, was carrying two different quantities: what a
+ticket *would* pay, and what it *did* pay. Grading a loser overwrote the first
+with the second. They are now separate:
+
+- **Potential return** — `stake x decimal odds`, fixed at placement, immutable
+  in every status, for everyone including an admin.
+- **Payout** — derived from status, never stored. Won pays the potential, lost
+  pays 0, push and void refund the stake, open has not paid anything yet.
+
+A losing ticket therefore keeps its projection on record and still pays nothing,
+which is how a paper ticket works — and it can no longer produce a row the
+schema refuses.
+
+**Fixed**
+
+- **Zeroing a loser's return accomplished nothing and cost information.** No
+  bankroll calculation anywhere reads a loser's return, so the write was
+  accounting-neutral. It only destroyed the placement fact. The proof was
+  already in the code: reversing a settlement had to *recompute* the value from
+  stake and odds to get it back.
+- **Bankroll existed in three places.** Settlement added to a stored number,
+  reversal subtracted from it, and archive credited it — while
+  `derivedBankroll()` and two SQL functions computed the same figure
+  independently. The ledger is now the only source; the stored value is a
+  persistence convenience that `weekStats()` corrects on read.
+- **The schema validated status values, not status transitions.** Nothing
+  prevented settling twice, grading straight from won to lost, or repricing a
+  ticket after the fact. A trigger now enforces legal transitions, freezes
+  stake, odds and potential return after placement, and keeps `settled_at`
+  consistent with status.
+- Settlement writes status and nothing else. Every monetary consequence follows
+  from it, so the branches can no longer disagree with the money.
+- Ungraded tickets at week end are voided and refunded — unchanged, but now
+  derived rather than hand-credited.
+- `Cloud.placeBet()` validates against the schema's own rules before spending a
+  round trip, so an invalid row is refused with a readable message instead of an
+  opaque 400.
+
+**Migration**
+
+Run `supabase/migrations/2026-08-04_v1.6.5_lifecycle.sql` once. It repairs
+projections that an older client zeroed, adds the derived payout function and
+the guard trigger, and is safe to run more than once. Local tickets are repaired
+automatically on load.
+
+**Added**
+
+- `docs/SPORTSBOOK_MODEL.md` — bankroll lifecycle, bet lifecycle, settlement
+  rules, weekly reset, sync model, and the invariants worth testing. The design
+  now lives with the code.
+- `tests/` is **in the repository**. It previously lived only in a scratch
+  directory and was lost when a session expired. 70 assertions across two
+  suites; `npm test` builds the preview and runs them.
+- `scripts/build-preview.mjs` builds the single-file preview reproducibly.
+
+**Notes**
+
+- Nothing was wrong with `potential_return > 0`. It caught a genuinely invalid
+  row and was right to.
+- Cross-device sync is unchanged: bets stay insert-only for users, settlement
+  stays admin-only and server-side, bankroll is still never stored server-side.
+
+---
+
 ## v1.6.4 — All-time leaderboard
 
 **Added**

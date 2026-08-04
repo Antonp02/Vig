@@ -788,3 +788,7 @@ button,select,input,a{touch-action:manipulation}
   .leader-row.alltime .tickets{display:none}
   .board-scope .line-range-btn{flex:1;min-height:40px}
 }
+
+/* v1.6.5 — a losing ticket shows what it would have paid, because the
+   projection is no longer destroyed at settlement */
+.would-have-paid{display:block;margin-top:4px;color:var(--muted);font-size:10px;font-weight:600;opacity:.85}
