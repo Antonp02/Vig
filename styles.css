@@ -792,3 +792,20 @@ button,select,input,a{touch-action:manipulation}
 /* v1.6.5 — a losing ticket shows what it would have paid, because the
    projection is no longer destroyed at settlement */
 .would-have-paid{display:block;margin-top:4px;color:var(--muted);font-size:10px;font-weight:600;opacity:.85}
+
+/* ---- v1.6.7 brand mark -------------------------------------------------
+   Replaces the CSS-drawn V with the real logo. The full lockup carries the
+   tagline; below 760px only the crown and wordmark survive, because the
+   tagline is unreadable at phone scale and the row is tight already. */
+.brand-logo,.brand-logo-compact{display:block;width:auto;object-fit:contain}
+.brand-logo{height:46px}
+.brand-logo-compact{display:none;height:32px}
+.brand-wrap{cursor:pointer;gap:0}
+.brand-wrap:focus-visible{outline:2px solid var(--green);outline-offset:6px;border-radius:12px}
+.auth-brand{justify-content:center}
+.auth-logo{height:54px;width:auto;display:block;margin:0 auto}
+@media(max-width:760px){
+  .brand-logo{display:none}
+  .brand-logo-compact{display:block}
+}
+@media(max-width:420px){.brand-logo-compact{height:27px}}

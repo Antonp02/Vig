@@ -21,6 +21,10 @@ const data = {
 html = html.replace('<script src="config.js"></script>',
   `<script>\n${Object.entries(data).map(([k, v]) => `window.${k}=${JSON.stringify(v)};`).join('\n')}\n${readFileSync('config.js', 'utf8')}\n</script>`);
 
+/* The preview is a single file, so image references have to travel with it. */
+html = html.replace(/(src|href)="(assets\/[^"]+\.png|icons\/[^"]+\.png)"/g,
+  (_, attr, path) => `${attr}="data:image/png;base64,${readFileSync(path).toString('base64')}"`);
+
 inline('<script src="app.js"></script>', 'app.js');
 
 writeFileSync(`VIG ${version} Preview.html`, html);

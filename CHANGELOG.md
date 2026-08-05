@@ -108,6 +108,30 @@ Three ways to close it:
 
 ---
 
+## v1.6.7 — Real brand mark
+
+**Changed**
+
+- The CSS-drawn `V` and the text lockup in the header are replaced by the
+  actual logo: crown, wordmark, and the *Mock Sportsbook & Fantasy Tools* rule.
+  The black field is knocked out to alpha, so the mark sits on the app's navy
+  rather than punching a black rectangle into it.
+- Below 760px the tagline is dropped and only the crown and wordmark show — the
+  rule is unreadable at phone scale and the header row is tight already.
+- The sign-in card uses the mark, centred.
+- Favicon, Apple touch icon, and both PWA install icons regenerated from the new
+  mark on the brand navy. Installed home-screen copies will pick these up.
+
+**Notes**
+
+- Assets are quantized and sized to 3x their largest display size: 68 KB for the
+  lockup, 23 KB for the mark. Both are precached by the service worker.
+- The preview build now inlines images as data URIs so the single file still
+  renders standalone.
+- No change to application logic. 100 assertions still green.
+
+---
+
 ## v1.6.6 — The outbox could hold a ticket forever
 
 **Fixed**
