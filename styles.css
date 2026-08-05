@@ -794,18 +794,13 @@ button,select,input,a{touch-action:manipulation}
 .would-have-paid{display:block;margin-top:4px;color:var(--muted);font-size:10px;font-weight:600;opacity:.85}
 
 /* ---- v1.6.7 brand mark -------------------------------------------------
-   Replaces the CSS-drawn V with the real logo. The full lockup carries the
-   tagline; below 760px only the crown and wordmark survive, because the
-   tagline is unreadable at phone scale and the row is tight already. */
-.brand-logo,.brand-logo-compact{display:block;width:auto;object-fit:contain}
-.brand-logo{height:46px}
-.brand-logo-compact{display:none;height:32px}
-.brand-wrap{cursor:pointer;gap:0}
-.brand-wrap:focus-visible{outline:2px solid var(--green);outline-offset:6px;border-radius:12px}
+   One small mark, top left, at roughly the footprint of the square logo it
+   replaces. The intrinsic width/height attributes in the markup match the
+   display size, so if the stylesheet is ever missing or stale the logo is
+   still small rather than 840px wide. */
+.brand-logo{display:block;width:auto;height:35px;object-fit:contain;flex:0 0 auto}
+.brand-wrap{cursor:pointer}
+.brand-wrap:focus-visible{outline:2px solid var(--accent);outline-offset:4px;border-radius:12px}
 .auth-brand{justify-content:center}
-.auth-logo{height:54px;width:auto;display:block;margin:0 auto}
-@media(max-width:760px){
-  .brand-logo{display:none}
-  .brand-logo-compact{display:block}
-}
-@media(max-width:420px){.brand-logo-compact{height:27px}}
+.auth-logo{display:block;width:auto;height:40px;margin:0 auto}
+@media(max-width:620px){.brand-logo{height:30px}}

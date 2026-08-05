@@ -108,6 +108,27 @@ Three ways to close it:
 
 ---
 
+## v1.6.8 — Brand mark dialled back
+
+**Changed**
+
+- One small mark in the header, roughly the footprint of the square logo it
+  replaces — 35px, dropping to 30px on phones. The full lockup and the separate
+  compact image are gone; the tagline no longer appears in the header at all.
+- Sign-in card mark reduced to match.
+
+**Fixed**
+
+- **The logo rendered at full size when the stylesheet was stale.** The
+  `width`/`height` attributes carried the file's intrinsic dimensions (840x527),
+  so a browser that had the new markup but an old cached `styles.css` drew the
+  logo at 840px across the header. The attributes now match the display size,
+  so an unstyled render is small rather than enormous.
+- Cache names are keyed to `VERSION`, bumped here, so the stale stylesheet is
+  discarded on the next load.
+
+---
+
 ## v1.6.7 — Real brand mark
 
 **Changed**

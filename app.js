@@ -6,7 +6,7 @@
 
 /* Build stamp. Every "is this device on the new code?" question has cost a
    round trip; now it is on screen. Bumped with the service worker cache. */
-const VIG_BUILD = 'v1.6.7';
+const VIG_BUILD = 'v1.6.8';
 
 /* ---------- 0. Persistence ---------- */
 const KEYS = {

@@ -14,7 +14,7 @@
      icons, manifest, data-> cache first, refreshed in the background
      /api/*               -> never cached, it is live odds
 --------------------------------------------------------------- */
-const VERSION = 'v1.6.7';
+const VERSION = 'v1.6.8';
 const SHELL = `vig-shell-${VERSION}`;
 const ASSETS = `vig-assets-${VERSION}`;
 
