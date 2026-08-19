@@ -75,6 +75,42 @@ Three implementations must agree: `derivedBankroll()` in the client, the `leader
 
 ---
 
+## 3b. Settlement from results
+
+A ticket grades when **every leg has a final result**. All correct is a win; one
+wrong leg is a loss **immediately**, without waiting for the other games — the
+bettor is already beaten, and making them wait is theatre.
+
+A tie is a **push**: stake back, no profit.
+
+### The three-day rule
+
+A ticket that cannot be graded **3 days after its last kickoff is voided and the
+stake refunded**.
+
+Not lost — **voided**. The bettor did nothing wrong; the book failed to grade it,
+and a book that keeps a stake because its own feed missed a game is stealing.
+This is also what stops the ledger accumulating tickets that can never resolve.
+
+`SETTLE_GRACE_MS` in `app.js`, tested at the boundary.
+
+### Who may settle
+
+`gradeOpenTickets()` **proposes**; it never writes. Who applies the proposal:
+
+| Situation | What happens |
+|---|---|
+| Offline / signed out | applied locally — the local ledger is the only one there is |
+| Signed in **as admin** | applied and pushed for everyone |
+| Signed in, **not** admin | **not applied**; the server's decision arrives by poll |
+
+That third row is the important one. If a signed-in user could settle their own
+bets from the client, they could declare themselves a winner. RLS forbids it at
+the database; this mirrors that rule in the UI rather than fighting it.
+
+Results come from the odds provider's `/scores` feed via the same Edge Function
+proxy, cached server-side like prices.
+
 ## 4. Weekly reset
 
 Tuesday 04:00 America/New_York.

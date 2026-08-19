@@ -41,6 +41,10 @@ const TTL_NEAR_MS = Number(Deno.env.get('ODDS_TTL_NEAR_MIN') ?? 15) * 60_000;
 const TTL_FAR_MS = Number(Deno.env.get('ODDS_TTL_FAR_MIN') ?? 180) * 60_000;
 const NEAR_WINDOW_MS = 6 * 60 * 60_000;
 const DAILY_CAP = Number(Deno.env.get('ODDS_DAILY_CAP') ?? 15);
+/* Scores drive settlement, so they refresh faster than prices — but the
+   /scores endpoint with daysFrom costs 2 credits, so not much faster. */
+const SCORES_TTL_MS = Number(Deno.env.get('ODDS_SCORES_TTL_MIN') ?? 20) * 60_000;
+const SCORES_DAYS_FROM = Number(Deno.env.get('ODDS_SCORES_DAYS') ?? 3);
 
 /* Origins allowed to call this. Anything else gets no CORS header and the
    browser blocks it. Add a domain here when VIG moves off Pages. */
@@ -206,15 +210,24 @@ Deno.serve(async (req: Request) => {
     return json({ error: 'odds feed is not configured' }, 503);
   }
 
-  const sportParam = new URL(req.url).searchParams.get('sport') ?? 'nfl';
+  const qs = new URL(req.url).searchParams;
+  const sportParam = qs.get('sport') ?? 'nfl';
   const isGolf = sportParam === 'golf';
-  const cacheKey = isGolf ? `golf:${REGION}:outrights` : `${SPORT}:${REGION}:${MARKETS}`;
+  /* Results for grading open tickets. A separate cache key and a shorter TTL:
+     a price three hours old is fine, a final score three hours late is not. */
+  const isScores = qs.get('feed') === 'scores';
+  const cacheKey = isScores ? `${SPORT}:scores`
+                 : isGolf   ? `golf:${REGION}:outrights`
+                            : `${SPORT}:${REGION}:${MARKETS}`;
   const cached = await readCache(cacheKey);
   const age = cached ? Date.now() - Date.parse(cached.fetched_at) : Infinity;
   const ttl = cached ? ttlFor(cached.payload) : 0;
 
+  /* Scores go stale fast while games are running. */
+  const effectiveTtl = isScores ? Math.min(ttl, SCORES_TTL_MS) : ttl;
+
   /* fresh enough — no upstream call, no credit spent */
-  if (cached && age < ttl) {
+  if (cached && age < effectiveTtl) {
     return json(cached.payload, 200, {
       'X-Odds-Cache': 'hit',
       'X-Odds-Age-Seconds': String(Math.round(age / 1000)),
@@ -254,6 +267,36 @@ Deno.serve(async (req: Request) => {
         status: 'unavailable', reason: 'upstream_error',
         detail: 'Could not reach the odds provider.', available: [], events: [],
       }, 200, { 'X-Odds-Golf-Status': 'unavailable' });
+    }
+  }
+
+  /* ---- results for settlement ---- */
+  if (isScores) {
+    try {
+      const res = await fetch(
+        `${ODDS_HOST}/v4/sports/${SPORT}/scores?apiKey=${encodeURIComponent(key)}` +
+        `&daysFrom=${SCORES_DAYS_FROM}`,
+      );
+      const quotaLeft = Number(res.headers.get('x-requests-remaining') ?? NaN);
+      if (!res.ok) {
+        console.error('[odds] scores', res.status, scrub(await res.text(), key));
+        if (cached) return json(cached.payload, 200, { 'X-Odds-Cache': 'stale' });
+        return json({ error: 'scores unavailable', status: res.status }, 502);
+      }
+      const data = await res.json();
+      await writeCache(cacheKey, data, Number.isFinite(quotaLeft) ? quotaLeft : null,
+        `scores, credit ${credit}/${DAILY_CAP}`);
+      const done = Array.isArray(data) ? data.filter((g) => g?.completed).length : 0;
+      console.log(`[odds] scores: ${done} completed of ${Array.isArray(data) ? data.length : 0}`);
+      return json(data, 200, {
+        'X-Odds-Cache': 'miss',
+        'X-Odds-Feed': 'scores',
+        'X-Odds-Quota-Remaining': Number.isFinite(quotaLeft) ? String(quotaLeft) : 'unknown',
+      });
+    } catch (e) {
+      console.error('[odds] scores failed', scrub(String(e), key));
+      if (cached) return json(cached.payload, 200, { 'X-Odds-Cache': 'stale' });
+      return json({ error: 'scores unreachable' }, 502);
     }
   }
 

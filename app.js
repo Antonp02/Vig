@@ -2994,6 +2994,158 @@ function renderTicker() {
   if (el) el.textContent = `${count} game${count === 1 ? '' : 's'}`;
 }
 
+/* ---------- 12a2. Settlement from real results (v1.7.1) -------------
+   Open tickets sat open forever: nothing in the app could learn that a game
+   had finished. With the scores feed it can.
+
+   TWO RULES, and the second matters more than it looks:
+
+   1. A ticket grades when every leg has a final result. All legs correct is a
+      win; one leg wrong is a loss, immediately, without waiting for the rest.
+   2. A ticket that cannot be graded 3 days after its last kickoff is VOIDED and
+      the stake refunded. Not lost — voided. The bettor did nothing wrong; the
+      book failed to grade it, and a book that keeps your stake because its own
+      feed missed a game is stealing. This is also what stops the ledger filling
+      with tickets that can never resolve.
+
+   AUTHORITY. docs/SPORTSBOOK_MODEL.md is explicit that the database settles and
+   users may not update their own bets — otherwise anyone could self-declare a
+   win. So this proposes; who applies it depends:
+     offline / signed out -> applied locally, which is the only ledger there is
+     signed in as admin   -> applied and pushed for everyone
+     signed in, not admin -> NOT applied; the server's decision arrives by poll
+------------------------------------------------------------------- */
+const SETTLE_GRACE_MS = 3 * 24 * 60 * 60 * 1000;   // 3 days
+const Scores = {
+  data: null,
+  fetchedAt: 0,
+  async load({ force = false } = {}) {
+    if (!force && this.data && Date.now() - this.fetchedAt < 5 * 60_000) return this.data;
+    const base = ((window.VIG_CONFIG || {}).SUPABASE_URL || '').trim().replace(/\/$/, '');
+    if (!base) return null;
+    const anon = ((window.VIG_CONFIG || {}).SUPABASE_ANON_KEY || '').trim();
+    const res = await fetch(`${base}/functions/v1/odds?feed=scores`, {
+      headers: { accept: 'application/json', apikey: anon, Authorization: `Bearer ${anon}` }
+    });
+    if (!res.ok) throw new Error(`scores ${res.status}`);
+    const body = await res.json();
+    this.data = Array.isArray(body) ? body : [];
+    this.fetchedAt = Date.now();
+    return this.data;
+  },
+  /* Final result for one game, or null while it is unplayed or in progress. */
+  result(game) {
+    if (!game || !game.completed) return null;
+    const s = {};
+    (game.scores || []).forEach(x => { s[String(x.name)] = Number(x.score); });
+    const home = s[game.home_team], away = s[game.away_team];
+    if (!isFinite(home) || !isFinite(away)) return null;
+    return {
+      home: game.home_team, away: game.away_team,
+      homeScore: home, awayScore: away,
+      winner: home > away ? game.home_team : away > home ? game.away_team : null,  // null = tie
+      completedAt: game.commence_time
+    };
+  }
+};
+
+/* Match a leg to a finished game. Legs carry a title like "Buffalo Bills
+   moneyline" and a gameId; the feed uses full team names. */
+function resultForLeg(leg, results) {
+  if (!leg) return null;
+  const title = String(leg.title || '');
+  const gid = String(leg.gameId || '').toLowerCase();
+  const hit = results.find(r => {
+    if (title.includes(r.home) || title.includes(r.away)) return true;
+    if (!gid) return false;
+    const h = String(abbrev(r.home)).toLowerCase(), a = String(abbrev(r.away)).toLowerCase();
+    return gid.includes(h) && gid.includes(a);
+  });
+  if (!hit) return null;
+
+  /* Which side did this leg back? Title first; a gameId alone is the matchup,
+     not a side, so an unreadable leg stays ungraded rather than guessed. */
+  const backed = title.includes(hit.home) ? hit.home
+               : title.includes(hit.away) ? hit.away : null;
+  if (!backed) return null;
+  if (hit.winner === null) return { outcome: 'push', game: hit };    // tie: stake back
+  return { outcome: hit.winner === backed ? 'win' : 'loss', game: hit };
+}
+
+/* What SHOULD each open ticket become, given the results we have?
+   Returns proposals only — nothing is written here. */
+function gradeOpenTickets(results, now = Date.now()) {
+  const out = [];
+  (week.tickets || []).filter(t => t.status === 'open').forEach(t => {
+    const legs = t.legs || [];
+    const graded = legs.map(l => resultForLeg(l, results));
+
+    /* One wrong leg settles a parlay immediately — the rest cannot save it. */
+    if (graded.some(g => g && g.outcome === 'loss')) {
+      out.push({ id: t.id, status: 'lost', reason: 'a leg lost' });
+      return;
+    }
+    if (graded.every(g => g && (g.outcome === 'win' || g.outcome === 'push'))) {
+      const allPush = graded.every(g => g.outcome === 'push');
+      out.push({ id: t.id, status: allPush ? 'push' : 'won',
+                 reason: allPush ? 'every leg tied' : 'every leg won' });
+      return;
+    }
+
+    /* Ungraded. Has it run out of time? */
+    const placed = Date.parse(t.placedAt || t.date || '') || 0;
+    const lastKick = legs.reduce((max, l) => {
+      const g = l.gameId ? RealBoard.find(l.gameId) : null;
+      const k = g ? Date.parse(g.kickoff) : 0;
+      return Math.max(max, k || 0);
+    }, 0) || placed;
+    if (lastKick && now - lastKick > SETTLE_GRACE_MS) {
+      out.push({ id: t.id, status: 'void',
+                 reason: 'no result within 3 days — stake refunded' });
+    }
+  });
+  return out;
+}
+
+/* Apply proposals, respecting who is allowed to settle. */
+async function autoSettleFromScores({ quiet = false } = {}) {
+  let games;
+  try { games = await Scores.load(); } catch (e) {
+    if (!quiet) console.warn('[VIG] scores unavailable:', e.message);
+    return { applied: 0, proposed: 0, blocked: null };
+  }
+  if (!games) return { applied: 0, proposed: 0, blocked: null };
+
+  const results = games.map(g => Scores.result(g)).filter(Boolean);
+  const proposals = gradeOpenTickets(results);
+  if (!proposals.length) return { applied: 0, proposed: 0, blocked: null };
+
+  const cloud = Cloud.enabled() && Cloud.signedIn();
+  if (cloud && !Admin.isServerAdmin()) {
+    /* The database decides. Saying so beats silently doing nothing. */
+    return { applied: 0, proposed: proposals.length, blocked: 'server-settles' };
+  }
+
+  let applied = 0;
+  proposals.forEach(p => {
+    const t = (week.tickets || []).find(x => x.id === p.id);
+    if (!t || t.status !== 'open') return;
+    t.status = p.status;                     // status only — payout() derives the rest
+    t.settledAt = new Date().toISOString();
+    t.settledBy = 'scores';
+    t.settleNote = p.reason;
+    applied++;
+    if (cloud) Outbox.addSettlement && Outbox.addSettlement(t, week.key);
+  });
+  if (applied) {
+    week.bankroll = derivedBankroll(week);
+    persist();
+    updateDashboard(); renderBets(activeBetFilter()); renderCompetition();
+    if (!quiet) showToast(`${applied} ticket${applied === 1 ? '' : 's'} settled from final scores.`);
+  }
+  return { applied, proposed: proposals.length, blocked: null };
+}
+
 /* ---------- 12b1. Live bet tracking ---------------------------------
    Open tickets need to reflect reality without a page reload. Right now
    the only thing that can change a status is an admin settling an event,
@@ -3096,9 +3248,16 @@ function startBetTracking() {
      device whose bets were already graded stopped listening entirely and
      never saw anything change — including a settlement done elsewhere.
      It now always polls, just less often when nothing is pending. */
-  let idleTicks = 0;
+  let idleTicks = 0, settleTicks = 0;
   const tick = () => {
     if (typeof document !== 'undefined' && document.hidden) return;
+    /* Check for final scores every 5 minutes while anything is open. The
+       scores response is cached server-side, so this costs nothing upstream
+       most of the time. */
+    if (openTickets().length && ++settleTicks >= 5) {
+      settleTicks = 0;
+      autoSettleFromScores({ quiet: false });
+    }
     if (openTickets().length) { idleTicks = 0; refreshTickets({ quiet: false }); return; }
     renderBetsLive();
     if (++idleTicks >= 4) { idleTicks = 0; refreshTickets({ quiet: true }); }
@@ -3896,6 +4055,7 @@ async function initCompare() {
     renderComparePickers();
     renderCompare();
     safely('ticker', renderTicker);
+    safely('auto-settle', () => autoSettleFromScores({ quiet: true }));
     safely('projections', () => { Fantasy.projCoverage = mergeProjections(); });
     if (buildDraftPool() && !draftState) renderDraft();
   } catch (err) {
@@ -4037,9 +4197,22 @@ function pendingSettlement() {
     && t.eventId === GolfEvent.data.eventId);
 }
 
+/* v1.7.1: the VIG Founders Invitational is over, and a finished private test
+   event has no business on a public tab. It stays reachable under ?admin=1 so
+   any ungraded tickets can still be settled — removing the card must not strand
+   somebody's stake. Live events show for everyone as before. */
+function golfEventVisible() {
+  if (!GolfEvent.data) return false;
+  const st = GolfEvent.state();
+  const finished = st && (st.status === 'final' || st.status === 'settled');
+  return finished ? Admin.enabled() : true;
+}
+
 function renderGolfEvent() {
   const box = document.getElementById('golfEvent');
   if (!box) return;
+  if (!golfEventVisible()) { box.innerHTML = ''; box.hidden = true; return; }
+  box.hidden = false;
   if (!GolfEvent.data) {
     box.innerHTML = '<div class="empty-state">Golf event unavailable. Check data/golf-event.json.</div>';
     return;
@@ -4274,15 +4447,38 @@ function settleGolfEvent(winnerId, { push = false } = {}) {
    confirms first and settlement is idempotent.
    ============================================================ */
 const Admin = {
+  /* v1.7.1: this used to LATCH. One visit to ?admin=1 wrote vig.v2.admin=true
+     and the settlement controls then appeared on every load forever, for that
+     browser, with no way to put them away short of clearing storage. Test
+     controls sitting permanently on the page is not a beta, it's a bug.
+
+     Visibility is now purely a property of the current URL: ?admin=1, or a
+     path ending /admin. Close the tab and the panel is gone.
+
+     This is about what is SHOWN. Whether the buttons actually do anything is
+     decided by public.admins in the database — see Admin.isServerAdmin(). */
   enabled() {
     try {
-      if (new URLSearchParams(location.search).get('admin') === '1') {
-        Store.set('vig.v2.admin', true);
-      }
-      return Store.get('vig.v2.admin', false) === true;
+      const p = new URLSearchParams(location.search);
+      if (p.get('admin') === '1') return true;
+      return /\/admin\/?$/.test(location.pathname);
     } catch (e) { return false; }
   },
-  disable() { Store.set('vig.v2.admin', false); }
+  /* The Hide button: drop the param and reload, so the panel is gone and the
+     URL matches what is on screen. */
+  disable() {
+    Store.remove('vig.v2.admin');            // retire the old latch if present
+    try {
+      const u = new URL(location.href);
+      u.searchParams.delete('admin');
+      location.replace(u.toString());
+    } catch (e) { location.reload(); }
+  },
+  /* URL visibility is not authority. Only the database says who may settle for
+     everyone; this mirrors the answer the server already gave us. */
+  isServerAdmin() {
+    try { return Cloud.admin === true; } catch (e) { return false; }
+  }
 };
 
 /* ONE settlement path, with one source of truth at a time.
@@ -5860,7 +6056,9 @@ window.VIG = {
                RealBoard, buildLineTeams, validOdds, GolfOutrights, TRENDING, DataSource,
                weekKeyFor, nextResetAt, RESET_TZ, RESET_HOUR, RESET_DOW,
                resolveDataMode, configuredDataMode, migrateDataMode, Store, KEYS,
-               fallbackGames, mockGames, renderTicker,
+               fallbackGames, mockGames, renderTicker, Admin, Scores,
+               gradeOpenTickets, autoSettleFromScores, resultForLeg, golfEventVisible,
+               SETTLE_GRACE_MS, renderGolfEvent,
                renderTrendingPicks, renderOtherSports, renderTrending, switchView,
                explainAuthFailure: () => Cloud.diagnose(),
                payout, potentialReturn, realizedReturn, repairTickets, validateTicketForUpload, settleOpenTickets, updateLifetime,

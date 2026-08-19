@@ -150,6 +150,44 @@ Three ways to close it:
   captured board of the actual week's games in memory. The ladder is now live →
   captured slate → invented, so an outage shows real teams at transcribed prices.
 
+**Fixed — open tickets never settled**
+
+- Nothing in the app could learn that a game had finished, so bets stayed open
+  indefinitely. The Edge Function now serves the provider's `/scores` feed
+  (separate cache key, 20-minute TTL — a price three hours old is fine, a final
+  score three hours late is not), and the app grades against it every five
+  minutes while anything is open.
+- **A losing leg settles the ticket immediately**, without waiting for the other
+  games. The bettor is already beaten; making them wait for Sunday to confirm a
+  Thursday loss is theatre.
+- A tie is a **push** — stake back, no profit.
+- **Three days ungraded means VOID, not lost.** The stake is refunded. The bettor
+  did nothing wrong; the book failed to grade the ticket, and a book that keeps
+  a stake because its own feed missed a game is stealing. It also stops the
+  ledger accumulating tickets that can never resolve.
+- **A signed-in user cannot settle their own bets.** `gradeOpenTickets()` only
+  proposes. Offline it applies locally; as an admin it applies for everyone; as
+  an ordinary signed-in user it applies nothing and waits for the server, because
+  otherwise anyone could declare themselves a winner. Documented in
+  `docs/SPORTSBOOK_MODEL.md`.
+
+**Fixed — the admin panel latched on**
+
+- `Admin.enabled()` wrote `vig.v2.admin = true` on the first `?admin=1` visit and
+  then showed the settlement controls on **every** load afterwards, with no way
+  to put them away short of clearing storage. Visibility is now purely a property
+  of the current URL — `?admin=1` or a path ending `/admin`. The stored flag is
+  ignored, so anyone carrying it from v1.7.0 is not stuck with the panel.
+- Whether the buttons *do* anything is still decided by `public.admins` in the
+  database, unchanged. URL visibility was never authority.
+
+**Changed — the finished Founders event left Trending**
+
+- The VIG Founders Invitational is over, and a finished private test event has no
+  business on a public tab. It stays reachable under `?admin=1` so any ungraded
+  tickets can still be settled — removing the card must not strand somebody's
+  stake. Live events show for everyone as before.
+
 **Fixed — the ticker was announcing a different week than the board**
 
 - The scrolling strip read the fantasy schedule file, which is pinned to Week 1,
@@ -175,7 +213,7 @@ Three ways to close it:
 
 **Notes**
 
-- 40 new assertions. 258 total.
+- 90 new assertions. 308 total.
 - Nothing is live. The endpoint, cache, CORS and budget checks in
   `docs/DEPLOY_v1.7.1.md` have not been run.
 
