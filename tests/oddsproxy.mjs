@@ -23,8 +23,11 @@ t.section('the odds API key is nowhere in the shipped bundle');
        'the client should only ever talk to our own proxy');
   t.ok('no apiKey query param built client-side', !/apiKey=\$\{/.test(src));
   const cfgKeys = Object.keys(w.VIG_CONFIG || {});
-  t.ok('config carries only the Supabase pair', cfgKeys.every(k => /^SUPABASE_/.test(k)),
+  t.ok('config carries no secret-looking keys',
+       cfgKeys.every(k => /^(SUPABASE_URL|SUPABASE_ANON_KEY|DATA_SOURCE)$/.test(k)),
        cfgKeys.join(','));
+  t.ok('and no odds key by any name',
+       !cfgKeys.some(k => /ODDS|SECRET|PRIVATE|SERVICE/i.test(k)), cfgKeys.join(','));
 }
 
 t.section('falls back cleanly with no Supabase configured');

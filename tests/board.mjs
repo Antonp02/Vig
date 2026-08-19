@@ -2,7 +2,7 @@
 import { boot, runner } from './harness.mjs';
 
 const t = runner('board slate and real lines');
-const { V } = await boot();
+const { V, document: d } = await boot();
 await V.RealBoard.load();
 
 t.section('the right slate is showing');
@@ -90,6 +90,33 @@ t.section('Line Winder picks up the real prices');
   t.ok('with a public split attached', typeof lac.publicPct === 'number', String(lac && lac.publicPct));
   const flat = real.find(x => x.abbr === 'HOU');
   t.eq('an unmoved line reports zero movement', flat.move, 0);
+}
+
+t.section('the ticker shows the same slate as the board');
+{
+  V.renderTicker();
+  const label = d.getElementById('tickerLabel').textContent;
+  const count = d.getElementById('tickerCount').textContent;
+  t.eq('labelled with the live slate', label, 'NFL Preseason · Week 2');
+  t.eq('and counts its games', count, '10 games');
+
+  const ticks = [...d.querySelectorAll('.tick-run')][0].querySelectorAll('.tick');
+  t.eq('one tick per game', ticks.length, 10);
+
+  const text = [...ticks].map(x => x.textContent).join(' | ');
+  t.ok('no stale Week 1 fixtures', !/Sep 13|Week 1/.test(label + text), label);
+  t.ok('leads with Thursday night', /LV.*HOU.*Thu 8:00 PM/.test(ticks[0].textContent),
+       ticks[0].textContent);
+  t.ok('kickoffs are in order',
+       /Thu/.test(ticks[0].textContent) && /Sat/.test(ticks[9].textContent),
+       `${ticks[0].textContent} … ${ticks[9].textContent}`);
+  t.ok('every tick carries a day and a time',
+       [...ticks].every(x => /(Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{1,2}:\d{2} (AM|PM) ET/.test(x.textContent)),
+       [...ticks].map(x => x.textContent).slice(0, 2).join(' | '));
+
+  t.ok('the strip is duplicated for a seamless loop',
+       d.querySelectorAll('.tick-run').length === 2);
+  t.ok('and the bar is visible', !d.querySelector('.ticker-bar').hidden);
 }
 
 t.done();

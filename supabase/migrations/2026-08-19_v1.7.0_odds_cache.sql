@@ -48,6 +48,11 @@ alter table public.odds_budget enable row level security;
 -- Claim one credit for today. Returns the new count, or null if the cap is
 -- already reached. Atomic: the insert-or-update and the test happen in one
 -- statement, so two callers cannot both see the last credit as free.
+-- SUPERSEDED IN v1.7.1 — this version did not enforce the cap.
+-- At used = p_cap the CASE held the value, RETURNING yielded p_cap, and
+-- `p_cap > p_cap` was false, so it returned a valid-looking credit forever.
+-- The corrected function is in 2026-08-19_v1.7.1_quota_cap_fix.sql and is
+-- reproduced here so a fresh install from this file alone is still correct.
 create or replace function public.claim_odds_credit(p_cap integer)
 returns integer
 language plpgsql
@@ -57,20 +62,19 @@ as $$
 declare
   v_used integer;
 begin
+  if p_cap is null or p_cap < 1 then
+    return null;
+  end if;
+
   insert into public.odds_budget (day, used)
        values (current_date, 1)
   on conflict (day) do update
-          set used = case when public.odds_budget.used < p_cap
-                          then public.odds_budget.used + 1
-                          else public.odds_budget.used end,
+          set used = public.odds_budget.used + 1,
               updated_at = now()
+        where public.odds_budget.used < p_cap
     returning used into v_used;
 
-  -- the update above refuses to increment past the cap, so an unchanged value
-  -- at or above the cap means there was nothing left to claim
-  if v_used > p_cap then
-    return null;
-  end if;
+  -- null means the WHERE refused the update: the day is spent
   return v_used;
 end;
 $$;

@@ -108,6 +108,79 @@ Three ways to close it:
 
 ---
 
+## v1.7.1 — Quota cap actually caps; Live for everyone
+
+**Fixed — the daily cap never blocked anything**
+
+- `claim_odds_credit()` returned a valid-looking credit forever once the cap was
+  reached. At `used = p_cap` the `CASE` held the value, `RETURNING` yielded
+  `p_cap`, and `p_cap > p_cap` is false — so every request past 15 was granted.
+  The comparison needed `>=`; the better fix removes the branch entirely by
+  making the `UPDATE` conditional, so "nothing left" is expressed as "no row
+  updated" rather than a value the caller has to interpret. **Caught in review by
+  Leah, not by me.**
+- A cap of zero or less now returns null on the INSERT path too. `ON CONFLICT …
+  WHERE` guards only the UPDATE, so the first call of the day would otherwise
+  have been granted regardless.
+- `2026-08-19_v1.7.1_quota_cap_fix.sql` carries an in-database self-test that
+  proves claim 16 returns null and leaves `used` at 15, then rolls back. The
+  v1.7.0 migration was corrected in place so a fresh install from it alone is
+  also correct.
+- 14 assertions model the corrected SQL, and — deliberately — the old buggy
+  version alongside it, asserting they differ exactly at request 16.
+
+**Fixed — Live mode was a per-browser setting**
+
+- `mode: Store.get(KEYS.mode, 'mock')` meant switching the admin device to Live
+  changed nothing for anyone else. There was no way to turn the product on.
+- `VIG_CONFIG.DATA_SOURCE` is now the production switch: change it, push, and
+  every visitor follows on their next load. It defaults to `'live'` when absent,
+  so an older config still turns the feed on.
+- **A one-time migration frees existing users.** Everyone who used VIG before
+  this release has `vig.v2.mode = 'mock'` in localStorage — the old default, not
+  a choice — which would pin them to simulated prices permanently. A stored
+  `'mock'` is treated as that stale default and dropped; a stored `'live'` is
+  honoured as a real choice. Idempotent.
+- An admin override still works and is now explicit: `setMode()` records who set
+  it and when, `clearMode()` releases the device back to the deploy default.
+
+**Fixed — the fallback invented games it didn't need to**
+
+- A failing feed dropped straight to `MOCK_BASE`, imaginary fixtures, even with a
+  captured board of the actual week's games in memory. The ladder is now live →
+  captured slate → invented, so an outage shows real teams at transcribed prices.
+
+**Fixed — the ticker was announcing a different week than the board**
+
+- The scrolling strip read the fantasy schedule file, which is pinned to Week 1,
+  so it said *"Sunday, Sep 13 · Week 1 · 13 games"* while the board underneath it
+  showed preseason games three weeks sooner. It now reads the same slate as
+  everything else — **NFL Preseason · Week 2, 10 games**, LV @ HOU Thu 8:00 PM
+  first — and rolls forward on its own when the slate does.
+- Kickoffs are formatted in Eastern explicitly. The board quotes ET everywhere,
+  and a ticker that silently localised would disagree with the rows beneath it.
+- Because the slate spans Thursday to Saturday, each tick now carries the day as
+  well as the time.
+- Falls back to the fantasy schedule only when no slate has a game left.
+
+**Preserved and re-verified**
+
+- Reset: Tuesday 04:00 `America/New_York`, DST-safe both ways, Thursday through
+  Monday night inside one competition week. Constants pinned by test.
+- Leaderboard copy reads *Resets Tuesday 4:00 AM ET*.
+- BMW: heading **BMW Championship — Winner**, badge **FanDuel snapshot**,
+  note **Updated Aug. 19, 2026 at 11:42 p.m. ET**, all 30 golfers, outright-win,
+  parlay-able, and no "Live" label unless a real matching feed exists.
+- Service worker and build tag bumped to `v1.7.1` so devices don't stay on 1.7.0.
+
+**Notes**
+
+- 40 new assertions. 258 total.
+- Nothing is live. The endpoint, cache, CORS and budget checks in
+  `docs/DEPLOY_v1.7.1.md` have not been run.
+
+---
+
 ## v1.7.0 — Live odds, with the key server-side
 
 **Changed — weekly reset**

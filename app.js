@@ -6,7 +6,7 @@
 
 /* Build stamp. Every "is this device on the new code?" question has cost a
    round trip; now it is on screen. Bumped with the service worker cache. */
-const VIG_BUILD = 'v1.7.0';
+const VIG_BUILD = 'v1.7.1';
 
 /* ---------- 0. Persistence ---------- */
 const KEYS = {
@@ -14,7 +14,9 @@ const KEYS = {
   results:   'vig.v2.results',
   snapshots: 'vig.v2.snapshots',
   drafts:    'vig.v2.drafts',
-  mode:      'vig.v2.mode',
+  mode:      'vig.v2.mode',            // legacy, migrated away in v1.7.1
+  modeOverride: 'vig.v2.mode.override',
+  modeMigrated: 'vig.v2.mode.migrated171',
   golf:      'vig.v2.golf',
   golfStake: 'vig.v2.golfStake',
   identity:  'vig.v2.identity',
@@ -45,6 +47,9 @@ const Store = (() => {
         const raw = JSON.stringify(value);
         if (usable) window.localStorage.setItem(key, raw); else mem[key] = raw;
       } catch (e) {}
+    },
+    remove(key) {
+      try { if (usable) window.localStorage.removeItem(key); else delete mem[key]; } catch (e) {}
     },
     reset() {
       Object.values(KEYS).forEach(k => {
@@ -345,6 +350,27 @@ const MOCK_BASE = [
   ['cin-cle', 'Sun 1:00 PM', ['CIN', 'Cincinnati Bengals', -165], ['CLE', 'Cleveland Browns', 140]]
 ];
 
+/* The fallback ladder, best first:
+     1. live feed
+     2. the captured slate — real teams, real transcribed prices
+     3. MOCK_BASE — invented games, only if no slate loaded
+
+   v1.7.1: step 2 was missing. A failing feed dropped straight to invented
+   fixtures even though a captured board of the actual week's games was sitting
+   in memory. Real games at a slightly old price beat imaginary games. */
+function fallbackGames() {
+  const slate = (typeof RealBoard !== 'undefined') ? RealBoard.upcoming() : [];
+  if (!slate.length) return mockGames();
+  return slate.map(g => ({
+    id: g.gameId,
+    commence: g.kickoff,
+    away: { abbr: g.away, name: NFL_NAMES[g.away] || g.away,
+            prices: [{ title: 'Captured', price: g.current.mlAway }] },
+    home: { abbr: g.home, name: NFL_NAMES[g.home] || g.home,
+            prices: [{ title: 'Captured', price: g.current.mlHome }] }
+  }));
+}
+
 function mockGames() {
   return MOCK_BASE.map(([id, commence, away, home]) => ({
     id, commence,
@@ -455,8 +481,59 @@ function bookSpread(team) {
   return round2((Math.max(...probs) - Math.min(...probs)) * 100);
 }
 
+/* ---------- Data source mode (v1.7.1) ----------------------------
+   What the deploy says, unless this device deliberately said otherwise.
+
+   VIG_CONFIG.DATA_SOURCE is the production switch: change it, push, and every
+   visitor follows on their next load. 'live' is the default when the key is
+   absent, so a config that predates this release still turns the feed on.
+------------------------------------------------------------------ */
+function configuredDataMode() {
+  const v = String(((window.VIG_CONFIG || {}).DATA_SOURCE || 'live')).toLowerCase();
+  return v === 'mock' ? 'mock' : 'live';
+}
+
+function resolveDataMode() {
+  const o = Store.get(KEYS.modeOverride, null);
+  if (o && (o.mode === 'live' || o.mode === 'mock')) return o.mode;
+  return configuredDataMode();
+}
+
+/* One-time, idempotent. Everyone who used VIG before v1.7.1 has
+   vig.v2.mode = 'mock' sitting in localStorage — not because they chose it, but
+   because that was the old default. Left alone it would pin them to simulated
+   prices permanently. So the legacy key is retired: a stored 'live' is honoured
+   as a real choice, a stored 'mock' is treated as the old default and dropped.
+
+   An admin who genuinely wants Mock re-selects it and gets a proper override. */
+function migrateDataMode() {
+  if (Store.get(KEYS.modeMigrated, false)) return null;
+  const legacy = Store.get(KEYS.mode, null);
+  let action = 'none';
+  if (legacy === 'live') {
+    Store.set(KEYS.modeOverride, { mode: 'live', at: new Date().toISOString(), by: 'migration' });
+    action = 'kept-live';
+  } else if (legacy === 'mock') {
+    action = 'dropped-stale-mock';       // fall through to the configured default
+  }
+  Store.remove(KEYS.mode);
+  Store.set(KEYS.modeMigrated, true);
+  if (action !== 'none') console.info(`[VIG] data mode migration: ${action}`);
+  return action;
+}
+
+migrateDataMode();
+
 const DataSource = {
-  mode: Store.get(KEYS.mode, 'mock'),
+  /* v1.7.1: the mode used to be read straight from localStorage with a 'mock'
+     default, which made it a per-browser setting. Switching the admin device to
+     Live left every other user, and every other device, on simulated prices
+     forever — there was no way to turn the product on.
+
+     Now: the shipped config decides the default for everybody, and a stored
+     override exists only when someone deliberately set one. Clearing the
+     override returns that device to whatever the deploy says. */
+  mode: resolveDataMode(),
   lastMeta: null,
   /* The Supabase Edge Function, when Supabase is configured. The API key lives
      in Edge Function Secrets and never reaches this file — the browser only
@@ -468,7 +545,7 @@ const DataSource = {
     return url ? `${url}/functions/v1/odds` : 'api/odds';
   },
   async fetchGames() {
-    if (this.mode !== 'live') return mockGames();
+    if (this.mode !== 'live') return fallbackGames();
     const ep = this.endpoint();
     const headers = { accept: 'application/json' };
     /* Supabase's gateway wants an apikey header even on a public function. The
@@ -491,7 +568,23 @@ const DataSource = {
     if (!games.length) throw new Error('feed returned no priced games');
     return games;
   },
-  setMode(m) { this.mode = m; Store.set(KEYS.mode, m); }
+  /* An explicit choice, remembered on this device only. */
+  setMode(m, opts) {
+    this.mode = (m === 'live') ? 'live' : 'mock';
+    Store.set(KEYS.modeOverride, { mode: this.mode, at: new Date().toISOString(),
+                                   by: (opts && opts.by) || 'admin' });
+    Store.remove(KEYS.mode);
+    return this.mode;
+  },
+  /* Drop back to the deployed default. */
+  clearMode() {
+    Store.remove(KEYS.modeOverride);
+    Store.remove(KEYS.mode);
+    this.mode = resolveDataMode();
+    return this.mode;
+  },
+  isOverridden() { return !!Store.get(KEYS.modeOverride, null); },
+  configuredDefault() { return configuredDataMode(); }
 };
 
 /* Board rows. Consensus is the bettable price; best price is
@@ -2848,27 +2941,57 @@ function fmtGameTime(t) {
   return `${h}:${m[2]} ${suffix}`;
 }
 
+/* Kickoff as "Thu 8:00 PM", in Eastern regardless of where the viewer is —
+   the board quotes ET everywhere else, and a ticker that silently localises
+   would disagree with the game rows underneath it. */
+function tickerWhen(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return '';
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York', weekday: 'short',
+    hour: 'numeric', minute: '2-digit'
+  }).format(d).replace(',', '');
+}
+
+/* v1.7.1: the ticker used to read the fantasy schedule file, which is pinned to
+   Week 1 — so it announced "Sunday, Sep 13" while the board showed preseason
+   games three weeks sooner. It now reads the same slate as the board, so the two
+   can never disagree and the ticker rolls forward on its own. */
 function renderTicker() {
   const strip = document.getElementById('gameTicker');
-  if (!strip || !Fantasy.data || !Fantasy.data.schedule) return;
-  const sch = Fantasy.data.schedule;
-  const feature = (sch.games || []).filter(g => g.date === sch.featureDate);
-  const games = feature.length ? feature : (sch.games || []);
+  if (!strip) return;
   const bar = strip.closest('.ticker-bar');
+
+  let games = [], label = '', count = 0;
+
+  const slate = (typeof RealBoard !== 'undefined' && RealBoard.data) ? RealBoard.upcoming() : [];
+  if (slate.length) {
+    games = slate.map(g => ({ away: g.away, home: g.home, when: tickerWhen(g.kickoff) }));
+    label = RealBoard.label();
+    count = slate.length;
+  } else if (Fantasy.data && Fantasy.data.schedule) {
+    /* fall back to the fantasy schedule only if no slate has any game left */
+    const sch = Fantasy.data.schedule;
+    const feature = (sch.games || []).filter(g => g.date === sch.featureDate);
+    const list = feature.length ? feature : (sch.games || []);
+    games = list.map(g => ({ away: g.away, home: g.home, when: fmtGameTime(g.time) }));
+    label = `${new Date(sch.featureDate + 'T12:00:00').toLocaleDateString(undefined,
+      { weekday: 'long', month: 'short', day: 'numeric' })} · Week ${sch.week}`;
+    count = list.length;
+  }
+
   if (!games.length) { if (bar) bar.hidden = true; return; }
   if (bar) bar.hidden = false;
 
-  const label = new Date(sch.featureDate + 'T12:00:00').toLocaleDateString(undefined,
-    { weekday: 'long', month: 'short', day: 'numeric' });
   const head = document.getElementById('tickerLabel');
-  if (head) head.textContent = `${label} · Week ${sch.week}`;
+  if (head) head.textContent = label;
 
-  const item = g => `<span class="tick"><b>${g.away}</b><i>@</i><b>${g.home}</b><em>${fmtGameTime(g.time)} ET</em></span>`;
+  const item = g => `<span class="tick"><b>${g.away}</b><i>@</i><b>${g.home}</b><em>${g.when} ET</em></span>`;
   const run = games.map(item).join('');
   strip.innerHTML = `<div class="tick-run">${run}</div><div class="tick-run" aria-hidden="true">${run}</div>`;
   strip.style.animationDuration = `${Math.max(28, games.length * 4.5)}s`;
-  const count = document.getElementById('tickerCount');
-  if (count) count.textContent = `${games.length} games`;
+  const el = document.getElementById('tickerCount');
+  if (el) el.textContent = `${count} game${count === 1 ? '' : 's'}`;
 }
 
 /* ---------- 12b1. Live bet tracking ---------------------------------
@@ -3105,9 +3228,9 @@ async function loadBoard() {
     renderFeedStatus(DataSource.mode === 'live' ? 'live' : 'mock', books ? `${books} books` : '');
   } catch (err) {
     console.warn('[VIG] live feed failed, using simulated:', err.message);
-    games = mockGames();
+    games = fallbackGames();
     renderFeedStatus('error');
-    showToast('Live odds unavailable. Showing simulated board.');
+    showToast('Live odds unavailable. Showing the captured board.');
   }
   markets = marketsFromGames(games);
   recordSnapshot(games);
@@ -3361,8 +3484,10 @@ function boot() {
         renderMarkets(activeFilter());
         renderHomeGames();
         renderTrending();
+        renderTrendingPicks();
         renderFeatured();     // cards are composed from the board, so rebuild them
         renderSlip();
+        renderTicker();       // the strip reads the same slate — keep it in step
       }
     }).catch(e => console.warn('[VIG] real board unavailable:', e && e.message));
   });
@@ -3375,6 +3500,7 @@ function boot() {
     renderTrending();
     renderTrendingPicks();
     renderOtherSports();
+    renderTicker();
     /* Ask the feed whether this event has a live market. Never blocks the
        board — captured prices show immediately, labelled as captured. */
     GolfOutrights.checkLive();
@@ -5733,6 +5859,8 @@ window.VIG = {
                Cloud, derivedBankroll, requireAccount,
                RealBoard, buildLineTeams, validOdds, GolfOutrights, TRENDING, DataSource,
                weekKeyFor, nextResetAt, RESET_TZ, RESET_HOUR, RESET_DOW,
+               resolveDataMode, configuredDataMode, migrateDataMode, Store, KEYS,
+               fallbackGames, mockGames, renderTicker,
                renderTrendingPicks, renderOtherSports, renderTrending, switchView,
                explainAuthFailure: () => Cloud.diagnose(),
                payout, potentialReturn, realizedReturn, repairTickets, validateTicketForUpload, settleOpenTickets, updateLifetime,
