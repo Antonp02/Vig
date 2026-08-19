@@ -813,3 +813,15 @@ button,select,input,a{touch-action:manipulation}
 .pub-pct{display:block;margin-top:4px;color:var(--muted);font-size:10px}
 .ml-move.flat{color:var(--muted)}
 .real-tag{color:var(--accent)}
+
+/* v1.7.0 — feed provenance. A captured price must never look like a live one,
+   so the tag states which it is and the note says why. */
+.feed-tag{font-size:11px;font-weight:800;padding:6px 10px;border-radius:999px;white-space:nowrap}
+.feed-live{color:#7ee0a8;background:rgba(126,224,168,.12)}
+.feed-checking{color:var(--muted);background:var(--panel2)}
+.feed-snapshot,.feed-captured{color:var(--gold);background:rgba(232,189,105,.12)}
+.feed-note{margin:14px 0 0;padding:11px 13px;border-left:3px solid var(--gold);
+  background:rgba(232,189,105,.07);color:var(--muted);font-size:12px;line-height:1.5;border-radius:0 8px 8px 0}
+.feed-note-mini{margin:12px 0 0;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
+.feed-note-mini.feed-live{color:#7ee0a8}
+.feed-note-mini.feed-snapshot,.feed-note-mini.feed-captured,.feed-note-mini.feed-checking{color:var(--muted)}

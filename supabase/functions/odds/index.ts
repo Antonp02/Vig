@@ -25,6 +25,14 @@
    ============================================================ */
 
 const ODDS_HOST = 'https://api.the-odds-api.com';
+
+/* The Odds API's golf coverage is the four majors only — Masters, PGA
+   Championship, US Open, The Open. Regular tour stops, the BMW Championship
+   included, are not offered at any plan level. So `?sport=golf` asks the
+   catalogue which golf markets are actually live and returns whichever match;
+   when none do, it says so plainly. The client must never dress a captured
+   price up as a live one. */
+const GOLF_PREFIX = 'golf_';
 const SPORT = Deno.env.get('ODDS_SPORT') ?? 'americanfootball_nfl';
 const REGION = Deno.env.get('ODDS_REGION') ?? 'us';
 const MARKETS = 'h2h'; // moneyline only — 1 credit per call
@@ -133,6 +141,53 @@ function ttlFor(payload: unknown): number {
   return soonest - now <= NEAR_WINDOW_MS ? TTL_NEAR_MS : TTL_FAR_MS;
 }
 
+/* Ask upstream which sports are in season. Costs no credit. */
+async function liveSports(key: string): Promise<Array<Record<string, unknown>>> {
+  const res = await fetch(`${ODDS_HOST}/v4/sports?apiKey=${encodeURIComponent(key)}`);
+  if (!res.ok) throw new Error(`sports catalogue ${res.status}`);
+  return await res.json();
+}
+
+/* Golf outrights, if any golf market is live. Returns a status either way so
+   the client can tell the difference between "no odds" and "no answer". */
+async function golfOutrights(key: string, credit: number, cap: number) {
+  const all = await liveSports(key);
+  const golf = all.filter((s) => String(s.key ?? '').startsWith(GOLF_PREFIX) && s.active);
+
+  if (!golf.length) {
+    return {
+      status: 'unavailable',
+      reason: 'no_live_golf_market',
+      detail: 'The odds provider covers the four majors only; no golf market is live.',
+      available: [],
+      events: [],
+    };
+  }
+
+  const events: unknown[] = [];
+  let used = credit;
+  for (const s of golf) {
+    if (used >= cap) break;
+    const sk = String(s.key);
+    const res = await fetch(
+      `${ODDS_HOST}/v4/sports/${sk}/odds?apiKey=${encodeURIComponent(key)}` +
+      `&regions=${encodeURIComponent(REGION)}&markets=outrights&oddsFormat=american`,
+    );
+    used++;
+    if (!res.ok) continue;
+    const rows = await res.json();
+    if (Array.isArray(rows) && rows.length) events.push(...rows);
+  }
+
+  return {
+    status: events.length ? 'live' : 'unavailable',
+    reason: events.length ? null : 'market_returned_empty',
+    detail: events.length ? null : 'A golf market is listed but returned no priced outrights.',
+    available: golf.map((s) => ({ key: s.key, title: s.title })),
+    events,
+  };
+}
+
 Deno.serve(async (req: Request) => {
   const origin = req.headers.get('origin');
   const cors = corsHeaders(origin);
@@ -151,7 +206,9 @@ Deno.serve(async (req: Request) => {
     return json({ error: 'odds feed is not configured' }, 503);
   }
 
-  const cacheKey = `${SPORT}:${REGION}:${MARKETS}`;
+  const sportParam = new URL(req.url).searchParams.get('sport') ?? 'nfl';
+  const isGolf = sportParam === 'golf';
+  const cacheKey = isGolf ? `golf:${REGION}:outrights` : `${SPORT}:${REGION}:${MARKETS}`;
   const cached = await readCache(cacheKey);
   const age = cached ? Date.now() - Date.parse(cached.fetched_at) : Infinity;
   const ttl = cached ? ttlFor(cached.payload) : 0;
@@ -176,6 +233,28 @@ Deno.serve(async (req: Request) => {
       });
     }
     return json({ error: 'odds temporarily unavailable', reason: 'daily cap reached' }, 429);
+  }
+
+  /* ---- golf takes a different shape: a status object, not a bare array ---- */
+  if (isGolf) {
+    try {
+      const payload = await golfOutrights(key, credit, DAILY_CAP);
+      await writeCache(cacheKey, payload, null, `credit ${credit}/${DAILY_CAP} today`);
+      return json(payload, 200, {
+        'X-Odds-Cache': 'miss',
+        'X-Odds-Golf-Status': String(payload.status),
+        'X-Odds-Credit-Today': `${credit}/${DAILY_CAP}`,
+      });
+    } catch (e) {
+      console.error('[odds] golf failed', scrub(String(e), key));
+      if (cached) {
+        return json(cached.payload, 200, { 'X-Odds-Cache': 'stale', 'X-Odds-Note': 'upstream unreachable' });
+      }
+      return json({
+        status: 'unavailable', reason: 'upstream_error',
+        detail: 'Could not reach the odds provider.', available: [], events: [],
+      }, 200, { 'X-Odds-Golf-Status': 'unavailable' });
+    }
   }
 
   const url =

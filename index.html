@@ -74,7 +74,7 @@
       <section class="panel span-2"><div class="panel-head"><div><span class="eyebrow">TRENDING</span><h2>Popular mock picks</h2></div><button class="text-btn" data-jump="parlay">See all</button></div><div id="trendingPicks" class="pick-list"></div></section>
       <section class="panel"><div class="panel-head"><div><span class="eyebrow">RECENT ACTIVITY</span><h2>Your latest tickets</h2></div></div><div id="recentBets" class="compact-list"></div><button class="full secondary" data-jump="bets">Open My Bets</button></section>
       <section class="panel"><div class="panel-head"><div><span class="eyebrow">FANTASY DRAFT LAB</span><h2>Next mock</h2></div></div><div class="draft-preview"><div><span>12-team PPR</span><strong>Pick 1.07</strong><small>Snake · 5 rounds</small></div><div class="draft-clock">0:30</div></div><button class="full secondary" data-jump="fantasy">Enter draft room</button></section>
-      <section class="panel"><div class="panel-head"><div><span class="eyebrow">TRENDING</span><h2>Other sports</h2></div></div><div class="movement-list"><div><span>Scottie Scheffler</span><strong>+450</strong><small class="positive">▲ 50</small></div><div><span>Rory McIlroy</span><strong>+900</strong><small class="negative">▼ 100</small></div><div><span>Ben Griffin</span><strong>+8000</strong><small class="positive">▲ 500</small></div></div><button class="full secondary" data-jump="trending">View trending board</button></section>
+      <section class="panel"><div class="panel-head"><div><span class="eyebrow">TRENDING</span><h2>Other sports</h2><p class="muted-copy" id="otherSportsEvent">Outrights</p></div></div><div class="movement-list" id="otherSports"></div><button class="full secondary" data-jump="trending">View trending board</button></section>
     </div>
   </section>
 
@@ -144,7 +144,7 @@
     <div id="trendingBoards" class="trending-boards"></div>
   </section>
 
-  <section id="leaderboard" class="view"><div class="section-title"><div><span class="eyebrow">PRIVATE LEAGUE</span><h1>Weekly leaderboard</h1><p>Ranked by realized profit for the current week. Resets Tuesday 2:00 AM PT.</p></div></div><div class="board-scope"><button class="line-range-btn active" data-board-scope="week">This week</button><button class="line-range-btn" data-board-scope="alltime">All time</button></div>
+  <section id="leaderboard" class="view"><div class="section-title"><div><span class="eyebrow">PRIVATE LEAGUE</span><h1>Weekly leaderboard</h1><p>Ranked by realized profit for the current week. Resets Tuesday 4:00 AM ET.</p></div></div><div class="board-scope"><button class="line-range-btn active" data-board-scope="week">This week</button><button class="line-range-btn" data-board-scope="alltime">All time</button></div>
 <p class="demo-note" id="leaderboardNote" hidden></p>
 <section class="panel leaderboard-card"><div id="leaderboardList"></div></section><section class="panel draft-results" id="draftResults"></section>
     <section class="panel saved-drafts"><div class="panel-head"><div><span class="eyebrow">ARCHIVE</span><h2>Past weeks</h2></div></div><div id="weekHistory"></div></section></section>

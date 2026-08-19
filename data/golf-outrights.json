@@ -6,13 +6,13 @@
  "startTime": "2026-08-20T09:00:00-04:00",
  "lockTime": "2026-08-20T09:00:00-04:00",
  "endTime": "2026-08-23T19:00:00-04:00",
- "source": "ESPN outright board, captured manually",
- "capturedAt": "2026-08-18T11:42:00-04:00",
+ "source": "FanDuel outright board, captured manually",
+ "capturedAt": "2026-08-19T23:42:00-04:00",
  "note": "Outright winner only. fairOdds is the de-vigged reference price: implied probabilities scaled so the book totals 100%, less a 3% slice reserved for the 20 players in the 50-man field ESPN did not list. It is an estimate, not a second book quote.",
  "markets": [
   {
    "marketId": "tournament-winner",
-   "name": "Tournament Winner",
+   "name": "BMW Championship — Winner",
    "selections": [
     {
      "selectionId": "g-scottie-scheffler",
@@ -256,5 +256,15 @@
     }
    ]
   }
- ]
+ ],
+ "marketLabel": "BMW Championship — Winner",
+ "provenance": {
+  "kind": "manual-snapshot",
+  "book": "FanDuel",
+  "label": "FanDuel snapshot",
+  "capturedAt": "2026-08-19T23:42:00-04:00",
+  "displayUpdated": "Updated Aug. 19, 2026 at 11:42 p.m. ET",
+  "isLive": false,
+  "note": "Hand-transcribed from FanDuel. The odds provider VIG uses covers the four majors only, so this event has no supported feed. When one exists, replace this block with kind:\"feed\" and the same shape flows through unchanged — nothing downstream reads anything but provenance.label / .displayUpdated / .isLive."
+ }
 }

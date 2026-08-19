@@ -77,7 +77,7 @@ Three implementations must agree: `derivedBankroll()` in the client, the `leader
 
 ## 4. Weekly reset
 
-Tuesday 02:00 America/Los_Angeles.
+Tuesday 04:00 America/New_York.
 
 1. Any ticket still `open` is voided and its stake refunded.
 2. Lifetime totals accumulate: bets, wins, losses, wagered, profit, biggest win, best finish.

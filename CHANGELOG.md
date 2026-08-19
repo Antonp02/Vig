@@ -110,6 +110,56 @@ Three ways to close it:
 
 ## v1.7.0 — Live odds, with the key server-side
 
+**Changed — weekly reset**
+
+- **The reset moved to Tuesday 04:00 America/New_York.** It was 02:00 Pacific,
+  which is 05:00 Eastern — an hour later than intended. Anchoring to Eastern
+  states the boundary in the zone the league actually lives in. Every user-facing
+  mention was updated with it; the leaderboard had been saying "2:00 AM PT".
+- 22 boundary assertions: 03:59 belongs to last week and 04:00 starts the new one
+  (to the second), a football week from Thursday kickoff through Monday night
+  never straddles two competition weeks, and neither DST transition shifts the
+  boundary.
+
+**Added — golf provenance**
+
+- **The BMW board is labelled a FanDuel snapshot, never live.** The panel reads
+  **BMW Championship — Winner**, the badge reads **FanDuel snapshot**, and the
+  note reads **Updated Aug. 19, 2026 at 11:42 p.m. ET**. The word "live" is
+  reserved: it appears only when `provenance.isLive` is true, which only a real
+  feed sets, and a test fails if it ever attaches to these prices.
+- **Swapping in a feed later needs no code.** Provenance lives in the data file;
+  everything downstream reads only `label`, `displayUpdated` and `isLive`. A test
+  covers the swap.
+
+**Fixed — golf rows were invisible in Trending**
+
+- The outright file loads after the board builds its `markets` array, so the rows
+  landed in `TRENDING` but the Trending panel rendered an empty golf section.
+  `install()` now keeps `markets` in step. Found by a test asserting the panel
+  actually contains the event — the earlier tests only checked `TRENDING`.
+
+**Added — feed status plumbing**
+
+- **A captured price is never shown as a live one.** The odds provider covers the
+  four majors only, so a regular tour stop like the BMW Championship has no live
+  market at any plan level — that is the permanent state, not an outage. The
+  Trending panel and the home card carry a tag reading **Captured prices** with
+  the capture date, and switch to **Live feed** only when the provider actually
+  returns a matching event.
+- `?sport=golf` on the Edge Function asks the catalogue which golf markets are
+  live and returns a status object either way, so the client can tell "no odds"
+  from "no answer".
+
+**Fixed — home page**
+
+- *Popular mock picks* is football again. It led with the two highest-edge rows of
+  any sport, which is how a tennis outright and a fantasy prop reached the top of
+  the page in preseason. It now shows four NFL moneylines ordered by kickoff.
+- *Other sports* was three hardcoded golfers with invented movement arrows, at
+  prices from a tournament finished weeks ago. It renders the real outright board
+  with the same provenance tag.
+
 **Added**
 
 - **`supabase/functions/odds`** — a Deno Edge Function that proxies The Odds API.
@@ -152,7 +202,9 @@ Three ways to close it:
 
 - Deploy with `--no-verify-jwt`: the board renders for signed-out visitors, so the
   endpoint has to be public. Auth isn't what protects the quota; the cache is.
-- 19 new assertions. 166 total.
+- 71 new assertions across `weekreset.mjs`, `homeboard.mjs` and `oddsproxy.mjs`,
+  including three that pin `RESET_TZ`/`RESET_HOUR`/`RESET_DOW` so the reset can't
+  drift unnoticed. 218 total.
 
 ---
 

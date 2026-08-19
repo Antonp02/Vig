@@ -169,17 +169,24 @@ const AUTO_ROLLOVER = false;
 
 const WEEKLY_BANKROLL = 1000;
 const WEEKLY_BET_LIMIT = 25;
-/* The competition week is anchored to Pacific so the label is unambiguous.
-   Tuesday 02:00 PT is Tuesday 05:00 ET — after Monday Night Football ends and
-   well before Thursday kickoff, so an NFL week (Thu -> Mon night) never
-   straddles two competition weeks. Golf runs Thu-Sun, clear of it too. */
-const RESET_TZ = 'America/Los_Angeles';
+/* The competition week is anchored to Eastern so the label is unambiguous.
+   Tuesday 04:00 ET is after Monday Night Football ends and well before Thursday
+   kickoff, so an NFL week (Thu -> Mon night) never straddles two competition
+   weeks. Golf runs Thu-Sun, clear of it too. */
+const RESET_TZ = 'America/New_York';
 /* An NFL week runs Thursday -> Monday night. A Monday 00:00 boundary split it
    in half, dropping Monday Night Football into the following VIG week. The
-   reset is Tuesday 02:00 Pacific: after MNF ends, before Thursday kickoff, and
-   the same place real fantasy leagues process waivers. */
+   reset is Tuesday 04:00 America/New_York: after MNF ends, before Thursday
+   kickoff, and the same place real fantasy leagues process waivers.
+
+   v1.7.0 moved this from 02:00 Pacific (= 05:00 Eastern) to 04:00 Eastern.
+   Anchoring to Eastern rather than Pacific means the boundary is stated in the
+   zone the league actually lives in, and DST is handled by the same tzParts()
+   path either way. The shift is one hour, so the resulting week key is
+   unchanged except for tickets placed between 04:00 and 05:00 Eastern on a
+   Tuesday — a window with no games in it. */
 const RESET_DOW = 2;        // 0=Sun, 2=Tue
-const RESET_HOUR = 2;       // 02:00 Pacific
+const RESET_HOUR = 4;       // 04:00 Eastern
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 function tzParts(date = new Date()) {
@@ -196,7 +203,7 @@ function tzParts(date = new Date()) {
   };
 }
 
-/* Tuesday-of-week key, e.g. "2026-07-28". Times before 02:00 PT belong to the
+/* Tuesday-of-week key, e.g. "2026-07-28". Times before 04:00 ET belong to the
    previous day, so Monday 23:00 still resolves to the prior Tuesday. */
 function weekKeyFor(date = new Date()) {
   const p = tzParts(date);
@@ -212,7 +219,7 @@ function weekKeyFor(date = new Date()) {
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
 }
 
-/* Absolute instant of the next Tuesday 02:00 PT, DST-corrected. */
+/* Absolute instant of the next Tuesday 04:00 ET, DST-corrected. */
 function nextResetAt(now = new Date()) {
   const p = tzParts(now);
   let dow = p.dow;
@@ -547,6 +554,92 @@ const GolfOutrights = {
     if (!d || !d.lockTime) return true;
     return Date.now() < new Date(d.lockTime).getTime();
   },
+  /* Live provenance. The odds provider covers the four majors only, so for a
+     regular tour stop like the BMW the honest answer is "these are captured
+     prices, from this date" — never a captured price wearing a live badge. */
+  live: { status: 'unknown', reason: null, detail: null, checkedAt: null },
+
+  async checkLive() {
+    const base = ((window.VIG_CONFIG || {}).SUPABASE_URL || '').trim().replace(/\/$/, '');
+    if (!base) { this.live = { status: 'unavailable', reason: 'not_configured',
+      detail: 'No odds proxy configured.', checkedAt: Date.now() }; return this.live; }
+    const anon = ((window.VIG_CONFIG || {}).SUPABASE_ANON_KEY || '').trim();
+    try {
+      const res = await fetch(`${base}/functions/v1/odds?sport=golf`,
+        { headers: { accept: 'application/json', apikey: anon, Authorization: `Bearer ${anon}` } });
+      if (!res.ok) throw new Error(`proxy ${res.status}`);
+      const body = await res.json();
+      const matched = this.matchEvent(body);
+      /* A match only counts if the data file is a feed. A manual snapshot stays a
+         manual snapshot even if some other golf market happens to be live. */
+      this.live = {
+        status: (matched && this.provenance().isLive) ? 'live' : 'unavailable',
+        reason: matched ? null : (body.reason || 'event_not_covered'),
+        detail: matched ? null : (body.detail ||
+          'The odds provider covers the four majors only, so this event has no live market.'),
+        checkedAt: Date.now()
+      };
+      if (matched) this.applyLive(matched);
+    } catch (e) {
+      this.live = { status: 'unavailable', reason: 'proxy_error',
+        detail: 'Could not reach the odds proxy.', checkedAt: Date.now() };
+    }
+    renderTrending();
+    renderOtherSports();
+    return this.live;
+  },
+
+  /* Does any live golf event actually match the board we are showing? */
+  matchEvent(body) {
+    const events = (body && body.events) || [];
+    if (!events.length || !this.data) return null;
+    const want = String(this.data.name || '').toLowerCase();
+    return events.find(e => {
+      const title = String(e.sport_title || '').toLowerCase();
+      return want && (title.includes(want) || want.includes(title.replace(/ winner$/, '')));
+    }) || null;
+  },
+
+  /* Replace captured prices with the provider's consensus, where we have one. */
+  applyLive(event) {
+    const prices = {};
+    ((event.bookmakers || [])[0] || {}).markets?.forEach(m => {
+      (m.outcomes || []).forEach(o => { if (validOdds(o.price)) prices[o.name] = o.price; });
+    });
+    this.selections().forEach(s => { if (prices[s.name]) s.americanOdds = prices[s.name]; });
+    this.install();
+  },
+
+  /* Where the prices came from, stated plainly.
+
+     The word "live" is reserved. It appears only when provenance.isLive is true,
+     which only a real feed sets. A hand-transcribed book snapshot says whose book
+     and when, and nothing more — so the two can never be confused.
+
+     TO SWAP IN A FEED LATER: set provenance.kind to "feed" and isLive to true in
+     the data file. Nothing downstream reads anything but label / displayUpdated /
+     isLive, so no code has to change. */
+  provenance() {
+    const p = (this.data && this.data.provenance) || {};
+    return {
+      kind: p.kind || 'manual-snapshot',
+      label: p.label || 'Manual snapshot',
+      updated: p.displayUpdated || '',
+      isLive: p.isLive === true
+    };
+  },
+
+  marketLabel() {
+    const d = this.data;
+    return (d && (d.marketLabel || d.name)) || 'Outrights';
+  },
+
+  statusLine() {
+    const p = this.provenance();
+    if (p.isLive) return { tone: 'live', label: p.label, text: p.updated || 'Live prices from the odds feed.' };
+    return { tone: 'snapshot', label: p.label, text: p.updated };
+  },
+
   /* Splice into TRENDING, replacing whatever golf rows are there. */
   install() {
     const rows = this.selections().map(s => ({
@@ -561,6 +654,22 @@ const GolfOutrights = {
       if (TRENDING[i].category === 'golf') TRENDING.splice(i, 1);
     }
     TRENDING.unshift(...rows);
+
+    /* `markets` is built from TRENDING once, at board refresh, and the outright
+       file loads after that — so without this the rows exist in TRENDING and the
+       Trending panel still renders an empty golf section. Mirror the same shape
+       marketsFromGames() produces rather than forcing a whole board rebuild. */
+    if (Array.isArray(markets)) {
+      for (let i = markets.length - 1; i >= 0; i--) {
+        if (markets[i].category === 'golf') markets.splice(i, 1);
+      }
+      markets.push(...rows.map(m => ({
+        id: m.id, gameId: null, category: m.category,
+        title: m.title, detail: m.event, odds: m.odds,
+        best: m.odds, bestBook: '', bookCount: 1, spread: 0,
+        edge: edgePoints(m), event: m.event
+      })));
+    }
     return rows.length;
   }
 };
@@ -1268,8 +1377,15 @@ function renderTrending() {
     const byEvent = {};
     rows.forEach(r => (byEvent[r.event || 'Featured'] = byEvent[r.event || 'Featured'] || []).push(r));
     return `<section class="panel trending-panel">
-      <div class="panel-head"><div><span class="eyebrow">${label.toUpperCase()}</span><h2>${label}</h2>
-        <p class="muted-copy">${blurb}</p></div><span class="updated">Simulated prices</span></div>
+      <div class="panel-head"><div><span class="eyebrow">${label.toUpperCase()}</span><h2>${
+          cat === 'golf' ? GolfOutrights.marketLabel() : label}</h2>
+        <p class="muted-copy">${blurb}</p></div>${(() => {
+          if (cat !== 'golf') return '<span class="updated">Simulated prices</span>';
+          const s = GolfOutrights.statusLine();
+          return `<span class="feed-tag feed-${s.tone}">${s.label}</span>`;
+        })()}</div>
+      ${cat === 'golf' && GolfOutrights.statusLine().text
+        ? `<p class="feed-note">${GolfOutrights.statusLine().text}</p>` : ''}
       ${Object.entries(byEvent).map(([ev, list]) => `
         <div class="trending-event"><h3>${ev}</h3>
         ${list.map(m => `<div class="market-row">
@@ -1292,11 +1408,27 @@ function renderTrending() {
   });
 }
 
+/* Home is a football app first. v1.7.0: this used to lead with the two
+   highest-edge rows of any sport, which is how a tennis outright and a fantasy
+   prop ended up at the top of the page in preseason. Football fills the card;
+   other sports only appear if the board is short, and they have their own
+   panel besides. */
 function renderTrendingPicks() {
   const box = document.getElementById('trendingPicks');
-  const value = markets.filter(m => m.edge > 0).sort((a, b) => b.edge - a.edge).slice(0, 2);
-  const nfl = markets.filter(m => m.category === 'nfl').slice(0, 2);
-  const show = [...value, ...nfl];
+  const isFootball = m => m.category === 'nfl';
+  /* soonest kickoff first, so the card leads with what is actually next */
+  const kickoff = m => {
+    const g = m.gameId ? RealBoard.find(m.gameId) : null;
+    return g ? new Date(g.kickoff).getTime() : Infinity;
+  };
+  const football = markets.filter(isFootball).sort((a, b) =>
+    (kickoff(a) - kickoff(b)) || ((b.edge || 0) - (a.edge || 0)));
+  const show = football.slice(0, 4);
+  if (show.length < 4) {
+    const rest = markets.filter(m => !isFootball(m) && m.edge > 0)
+      .sort((a, b) => b.edge - a.edge);
+    show.push(...rest.slice(0, 4 - show.length));
+  }
   box.innerHTML = show.map(m => `<div class="pick-row">
     <div class="pick-meta"><span>${m.title}</span><small>${m.detail}</small></div>
     <div class="pick-actions">${m.edge > 0 ? `<span class="edge-chip">+${m.edge.toFixed(1)}%</span>` : ''}
@@ -1306,6 +1438,29 @@ function renderTrendingPicks() {
     switchView('parlay');
     toggleLeg(b.dataset.trend);
   });
+}
+
+/* The home "Other sports" card. It was three hardcoded golfers with invented
+   movement arrows — prices from a tournament that finished weeks ago. It now
+   renders the top of the real outright board, with the same provenance tag the
+   Trending panel uses. */
+function renderOtherSports() {
+  const box = document.getElementById('otherSports');
+  if (!box) return;
+  const rows = TRENDING.filter(m => m.category === 'golf').slice(0, 3);
+  if (!rows.length) {
+    box.innerHTML = '<div class="empty-state">No outright board loaded.</div>';
+    return;
+  }
+  const st = GolfOutrights.statusLine();
+  const head = document.getElementById('otherSportsEvent');
+  if (head) head.textContent = GolfOutrights.marketLabel();
+  box.innerHTML = rows.map(m => `<div>
+      <span>${m.title.replace(/ to win$/, '')}</span>
+      <strong>${fmtOdds(m.odds)}</strong>
+      <small>to win</small>
+    </div>`).join('')
+    + `<p class="feed-note-mini feed-${st.tone}">${st.label}${st.text ? ` · ${st.text}` : ''}</p>`;
 }
 
 /* ---------- 10. Line Winder ---------------------------------
@@ -1804,7 +1959,7 @@ function renderCompetition() {
   if (champBox) {
     champBox.innerHTML = `<div class="champ-head"><span class="eyebrow">WEEK OF ${week.key}</span>
         <h2>${champ.you ? 'You are leading this week' : `${champ.name} is leading this week`}</h2>
-        <p class="muted-copy">Ranked by realized profit. Everyone restarts at ${money(WEEKLY_BANKROLL)} Tuesday 2:00 AM PT.</p></div>
+        <p class="muted-copy">Ranked by realized profit. Everyone restarts at ${money(WEEKLY_BANKROLL)} Tuesday 4:00 AM ET.</p></div>
       <div class="champ-stats">
         <div><span>Profit</span><strong class="profit">${champ.profit >= 0 ? '+' : ''}${money(champ.profit)}</strong></div>
         <div><span>Hit rate</span><strong>${champ.hitRate}%</strong></div>
@@ -3218,6 +3373,11 @@ function boot() {
     GolfOutrights.install();
     renderMarkets(activeFilter());
     renderTrending();
+    renderTrendingPicks();
+    renderOtherSports();
+    /* Ask the feed whether this event has a live market. Never blocks the
+       board — captured prices show immediately, labelled as captured. */
+    GolfOutrights.checkLive();
   });
   safely('golf event', async () => {
     await GolfEvent.load();
@@ -5572,6 +5732,8 @@ window.VIG = {
                GolfEvent, Admin, settleGolfEvent, settleAndSync, golfLeaderboardHtml, autoSettleFromEventData, pendingSettlement, golfTickets, getIdentity, saveIdentity, archiveWeek, blankWeek,
                Cloud, derivedBankroll, requireAccount,
                RealBoard, buildLineTeams, validOdds, GolfOutrights, TRENDING, DataSource,
+               weekKeyFor, nextResetAt, RESET_TZ, RESET_HOUR, RESET_DOW,
+               renderTrendingPicks, renderOtherSports, renderTrending, switchView,
                explainAuthFailure: () => Cloud.diagnose(),
                payout, potentialReturn, realizedReturn, repairTickets, validateTicketForUpload, settleOpenTickets, updateLifetime,
                decimalOdds, americanFromDecimal, impliedProb, round2, fmtOdds, combinedAmerican, devigPair,
