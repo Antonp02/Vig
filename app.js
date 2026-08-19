@@ -6,7 +6,7 @@
 
 /* Build stamp. Every "is this device on the new code?" question has cost a
    round trip; now it is on screen. Bumped with the service worker cache. */
-const VIG_BUILD = 'v1.6.8';
+const VIG_BUILD = 'v1.6.9';
 
 /* ---------- 0. Persistence ---------- */
 const KEYS = {
@@ -352,11 +352,9 @@ function mockGames() {
    than fair we flag it as value on the board.
 ------------------------------------------------------------ */
 const TRENDING = [
-  { id: 'gf-1', category: 'golf', event: 'The Open Championship', title: 'Scottie Scheffler to win',      odds: 450,  fair: 420 },
-  { id: 'gf-2', category: 'golf', event: 'The Open Championship', title: 'Rory McIlroy to win',           odds: 900,  fair: 850 },
-  { id: 'gf-3', category: 'golf', event: 'The Open Championship', title: 'Ben Griffin top-10 finish',     odds: 320,  fair: 360 },
-  { id: 'gf-4', category: 'golf', event: 'FedEx St. Jude',        title: 'Xander Schauffele to win',      odds: 1200, fair: 1100 },
-  { id: 'gf-5', category: 'golf', event: 'FedEx St. Jude',        title: 'Collin Morikawa top-5 finish',  odds: 425,  fair: 400 },
+  /* Golf rows are loaded from data/golf-outrights.json at boot — see
+     GolfOutrights.install(). The Open and FedEx St. Jude have both been played;
+     hardcoding a finished tournament is how a board goes stale. */
   { id: 'tn-1', category: 'tennis', event: 'US Open',             title: 'Carlos Alcaraz to win title',   odds: 240,  fair: 225 },
   { id: 'tn-2', category: 'tennis', event: 'US Open',             title: 'Jannik Sinner to win title',    odds: 275,  fair: 300 },
   { id: 'tn-3', category: 'tennis', event: 'US Open',             title: 'Coco Gauff to win title',       odds: 550,  fair: 500 },
@@ -499,6 +497,53 @@ function marketsFromGames(list) {
   return rows;
 }
 
+/* ---------- Golf outrights (v1.6.9) --------------------------------
+   A real outright board. Every golfer is one selection at one price:
+   to win the tournament, nothing else. They enter TRENDING, so the
+   parlay builder, trending panel and bet slip pick them up with no
+   special-casing — a golfer is just another leg.
+------------------------------------------------------------------- */
+const GolfOutrights = {
+  data: null,
+  async load() {
+    if (this.data) return this.data;
+    if (window.VIG_GOLF_OUTRIGHTS) { this.data = window.VIG_GOLF_OUTRIGHTS; return this.data; }
+    const res = await fetch('data/golf-outrights.json');
+    if (!res.ok) throw new Error(`golf outrights ${res.status}`);
+    this.data = await res.json();
+    return this.data;
+  },
+  selections() {
+    const m = this.data && this.data.markets && this.data.markets[0];
+    return (m && m.selections) || [];
+  },
+  eventLabel() {
+    const d = this.data;
+    return d ? `${d.name} · ${fmtEventDate(d.startTime)}` : 'Golf';
+  },
+  isOpen() {
+    const d = this.data;
+    if (!d || !d.lockTime) return true;
+    return Date.now() < new Date(d.lockTime).getTime();
+  },
+  /* Splice into TRENDING, replacing whatever golf rows are there. */
+  install() {
+    const rows = this.selections().map(s => ({
+      id: `go-${s.selectionId}`,
+      category: 'golf',
+      event: this.eventLabel(),
+      title: `${s.name} to win`,
+      odds: s.americanOdds,
+      fair: validOdds(s.fairOdds) ? s.fairOdds : s.americanOdds
+    }));
+    for (let i = TRENDING.length - 1; i >= 0; i--) {
+      if (TRENDING[i].category === 'golf') TRENDING.splice(i, 1);
+    }
+    TRENDING.unshift(...rows);
+    return rows.length;
+  }
+};
+
 /* ---------- 4b. Real Week 1 board (v1.5.3) --------------------------
    Real ESPN numbers with both the opening and current line, so the move
    between them is genuine rather than generated. Replaces the simulated
@@ -509,15 +554,38 @@ function marketsFromGames(list) {
    current and opening total. What is NOT: an opening moneyline, which
    the source did not carry. So no moneyline "open" is invented.
 ------------------------------------------------------------------- */
+/* Slates in the order they happen. The board shows the earliest one that
+   still has a game left to play, so it moves from preseason to Week 1 on its
+   own rather than needing a deploy on the right morning. */
+const BOARD_SLATES = [
+  { file: 'data/nfl-2026-preseason-w2.json', global: 'VIG_NFL_PRESEASON_W2' },
+  { file: 'data/nfl-2026-week1.json',        global: 'VIG_NFL_WEEK1' }
+];
+
 const RealBoard = {
   data: null,
   async load() {
     if (this.data) return this.data;
-    if (window.VIG_NFL_WEEK1) { this.data = window.VIG_NFL_WEEK1; return this.data; }
-    const res = await fetch('data/nfl-2026-week1.json');
-    if (!res.ok) throw new Error(`board ${res.status}`);
-    this.data = await res.json();
+    const loaded = [];
+    for (const s of BOARD_SLATES) {
+      if (window[s.global]) { loaded.push(window[s.global]); continue; }
+      try {
+        const res = await fetch(s.file);
+        if (res.ok) loaded.push(await res.json());
+      } catch (e) { /* a missing slate is not fatal; try the next */ }
+    }
+    if (!loaded.length) throw new Error('no board data');
+    const now = Date.now();
+    const live = loaded.find(d => (d.games || []).some(g => new Date(g.kickoff).getTime() > now));
+    this.data = live || loaded[loaded.length - 1];
     return this.data;
+  },
+  label() { return (this.data && this.data.label) || 'NFL'; },
+  /* Games that have not kicked off, soonest first. */
+  upcoming() {
+    const now = Date.now();
+    return this.games().filter(g => new Date(g.kickoff).getTime() > now)
+      .sort((a, b) => new Date(a.kickoff) - new Date(b.kickoff));
   },
   games() { return (this.data && this.data.games) || []; },
   find(gameId) { return this.games().find(g => g.gameId === gameId) || null; },
@@ -549,6 +617,10 @@ const RealBoard = {
         /* spread shown from this side */
         spreadLine: isAway ? g.current.spread : round2(-g.current.spread),
         total: g.current.total,
+        /* present on slates that carry an opening moneyline (preseason W2 on) */
+        openOdds: validOdds(isAway ? g.open.mlAway : g.open.mlHome)
+                    ? (isAway ? g.open.mlAway : g.open.mlHome) : null,
+        publicPct: g.public ? (isAway ? g.public.mlAway : g.public.mlHome) : null,
         real: true
       });
       out.push(mk(g.away, g.current.mlAway, true));
@@ -1181,7 +1253,9 @@ function renderTrending() {
         <div class="trending-event"><h3>${ev}</h3>
         ${list.map(m => `<div class="market-row">
           <div class="market-meta"><span>${m.title.replace(` to win`, ' — outright')}</span>
-            <small>Fair ${fmtOdds(TRENDING.find(t => t.id === m.id).fair)} · offered ${fmtOdds(m.odds)}</small></div>
+            <small>${(() => { const t = TRENDING.find(x => x.id === m.id);
+              return t && validOdds(t.fair) ? `Fair ${fmtOdds(t.fair)} · offered ${fmtOdds(m.odds)}` : `offered ${fmtOdds(m.odds)}`;
+            })()}</small></div>
           <div class="pick-actions">
             ${m.edge > 0 ? `<span class="edge-chip">+${m.edge.toFixed(1)}%</span>` : ''}
             <span class="odds">${fmtOdds(m.odds)}</span>
@@ -1294,7 +1368,32 @@ function recordSnapshot(list) {
 
 function buildLineTeams() {
   const out = [];
-  /* real prices first, flagged, so they read differently from the simulated board */
+  /* Board slate first. From preseason W2 on, the source carries an OPENING
+     moneyline for both sides, so this is a real two-point move on each line
+     rather than a flat away price — and it carries the public split, which is
+     the first half of answering "why did it move". */
+  RealBoard.upcoming().forEach(g => {
+    const label = `${g.away} @ ${g.home}`;
+    const when = new Date(g.kickoff).toLocaleString(undefined,
+      { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+    const side = (abbr, isAway) => {
+      const open = isAway ? g.open.mlAway : g.open.mlHome;
+      const now  = isAway ? g.current.mlAway : g.current.mlHome;
+      const pub  = g.public ? (isAway ? g.public.mlAway : g.public.mlHome) : null;
+      const series = validOdds(open) && open !== now ? [open, now] : [now, now];
+      return {
+        game: label, gameId: 'board-' + g.gameId, time: when,
+        team: NFL_NAMES[abbr] || abbr, abbr, current: now,
+        best: { price: now }, spread: 0, bookCount: 1,
+        move: validOdds(open) ? now - open : 0,
+        openPrice: validOdds(open) ? open : null,
+        publicPct: (typeof pub === 'number') ? pub : null,
+        series, books: {}, live: true, real: true
+      };
+    };
+    out.push(side(g.away, true));
+    out.push(side(g.home, false));
+  });
   knownLineGames().forEach(g => {
     const label = `${g.away} @ ${g.home}`;
     out.push({
@@ -1371,9 +1470,14 @@ function renderLineMatchups() {
       ${teams.map(t => `<label class="moneyline-team">
         <input type="${chartMode === 'books' ? 'radio' : 'checkbox'}" name="lw-pick" data-line-team="${t.abbr}" ${(chartMode === 'books' ? bookTeam === t.abbr : selectedLineTeams.includes(t.abbr)) ? 'checked' : ''}>
         <div><strong>${t.team}</strong>
-          <small>${t.real ? '<b class="real-tag">real price</b>' : t.bookCount > 1 ? `best ${fmtOdds(t.best.price)} · ${t.bookCount} books · ${t.spread.toFixed(1)}% spread` : `${t.abbr} moneyline`}</small></div>
+          <small>${t.real
+            ? `<b class="real-tag">real price</b>${validOdds(t.openPrice) ? ` opened ${fmtOdds(t.openPrice)}` : ''}`
+            : t.bookCount > 1 ? `best ${fmtOdds(t.best.price)} · ${t.bookCount} books · ${t.spread.toFixed(1)}% spread` : `${t.abbr} moneyline`}</small>
+          ${typeof t.publicPct === 'number' ? `<span class="pub-bar" title="${t.publicPct}% of public money on this side">
+            <i style="width:${Math.max(2, Math.min(100, t.publicPct))}%"></i></span><small class="pub-pct">${t.publicPct}% of tickets</small>` : ''}</div>
         <div><span class="ml-price">${fmtOdds(t.current)}</span>
-          <span class="ml-move ${t.move < 0 ? 'positive' : 'negative'}">${t.move < 0 ? '▼' : '▲'} ${Math.abs(t.move)}</span></div>
+          ${t.move ? `<span class="ml-move ${t.move < 0 ? 'positive' : 'negative'}">${t.move < 0 ? '▼' : '▲'} ${Math.abs(t.move)}</span>`
+                   : '<span class="ml-move flat">— unchanged</span>'}</div>
       </label>`).join('')}
     </article>`).join('');
 
@@ -3088,6 +3192,12 @@ function boot() {
   });
   safely('home games', renderHomeGames);
   safely('bet tracking', startBetTracking);
+  safely('golf outrights', async () => {
+    await GolfOutrights.load();
+    GolfOutrights.install();
+    renderMarkets(activeFilter());
+    renderTrending();
+  });
   safely('golf event', async () => {
     await GolfEvent.load();
     autoSettleFromEventData();
@@ -4289,6 +4399,37 @@ const Cloud = {
     await this.loadAdmin();
   },
 
+  /* "Failed to fetch" is what the browser says when a request never reached a
+     server at all. It is the same message whether the project is paused, the
+     device is offline, or the URL is wrong — useless on its own. So when we see
+     it, go and find out which, by asking the auth server's own health endpoint.
+     It needs no key and no session. */
+  async diagnose() {
+    const { url, key } = this.config();
+    if (!url || !key) return { ok: false, cause: 'unconfigured',
+      message: 'No Supabase URL or key in config.js.' };
+    if (typeof navigator !== 'undefined' && navigator.onLine === false)
+      return { ok: false, cause: 'offline', message: 'This device is offline.' };
+    if (!window.supabase || !window.supabase.createClient)
+      return { ok: false, cause: 'sdk', message: 'The Supabase SDK did not load — a blocker or firewall may be stopping the CDN.' };
+    let res;
+    try {
+      res = await fetch(url.replace(/\/$/, '') + '/auth/v1/health',
+                        { headers: { apikey: key }, cache: 'no-store' });
+    } catch (e) {
+      return { ok: false, cause: 'unreachable',
+        message: 'The Supabase project did not answer. Free projects pause after about a week idle — check the dashboard for a Restore button.' };
+    }
+    if (res.status === 401 || res.status === 403)
+      return { ok: false, cause: 'key',
+        message: `The project answered but rejected the key (${res.status}). The anon/publishable key in config.js may be stale.` };
+    if (res.status >= 500)
+      return { ok: false, cause: 'server',
+        message: `The project answered with ${res.status} — Supabase side, not yours.` };
+    return { ok: true, cause: 'reachable',
+      message: 'Auth server is reachable, so the failure is with this specific request, not the connection.' };
+  },
+
   async signUpPassword(email, password) {
     if (!this.client) throw new Error('Cloud not ready');
     const { data, error } = await this.client.auth.signUp({
@@ -5048,8 +5189,23 @@ function wirePasswordAuth() {
       }
     } catch (ex) {
       const msg = ex && ex.message ? ex.message : 'Could not sign in.';
-      err.textContent = /invalid login/i.test(msg)
-        ? 'That email and password do not match.' : msg;
+      if (/invalid login/i.test(msg)) {
+        err.textContent = 'That email and password do not match.';
+      } else if (/failed to fetch|networkerror|load failed|network request failed/i.test(msg)) {
+        /* the connection died, not the credentials — find out why and say so */
+        err.textContent = 'Checking the connection…';
+        const d = await Cloud.diagnose();
+        err.textContent = d.ok
+          ? 'The server is reachable but refused the request. Email sign-in may be disabled for this project.'
+          : d.message;
+        console.warn('[VIG] auth diagnosis:', d);
+      } else if (/email logins are disabled|signups not allowed|not enabled/i.test(msg)) {
+        err.textContent = 'Email sign-in is turned off for this project. Enable it in Supabase → Authentication → Providers.';
+      } else if (/rate limit|too many/i.test(msg)) {
+        err.textContent = 'Too many attempts. Wait a minute and try again.';
+      } else {
+        err.textContent = msg;
+      }
       btn.disabled = false; btn.textContent = authMode2 === 'signup' ? 'Create account' : 'Sign in';
     }
   };
@@ -5394,6 +5550,8 @@ window.VIG = {
                get bootErrors() { return bootErrors; }, tzParts, weekKeyFor, nextResetAt, RESET_TZ, RESET_HOUR,
                GolfEvent, Admin, settleGolfEvent, settleAndSync, golfLeaderboardHtml, autoSettleFromEventData, pendingSettlement, golfTickets, getIdentity, saveIdentity, archiveWeek, blankWeek,
                Cloud, derivedBankroll, requireAccount,
+               RealBoard, buildLineTeams, validOdds, GolfOutrights, TRENDING,
+               explainAuthFailure: () => Cloud.diagnose(),
                payout, potentialReturn, realizedReturn, repairTickets, validateTicketForUpload, settleOpenTickets, updateLifetime,
                decimalOdds, americanFromDecimal, impliedProb, round2, fmtOdds, combinedAmerican, devigPair,
                devigProportional, devigPower, fairProbability, DEVIG_METHOD, round4, needsAccount, needsProfile, openAuth,

@@ -2,14 +2,20 @@
    Committed to the repo deliberately: the suite was lost once because it
    lived only in a scratch directory. */
 import { JSDOM } from 'jsdom';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-export function boot({ version = 'v1.6.5', wait = 1500 } = {}) {
-  const html = readFileSync(join(root, `VIG ${version} Preview.html`), 'utf8');
+export function boot({ version = null, wait = 1500 } = {}) {
+  /* Don't pin a version — read whichever preview the build just produced, so
+     the suite keeps working across releases. */
+  const file = version
+    ? `VIG ${version} Preview.html`
+    : readdirSync(root).filter(f => /^VIG .* Preview\.html$/.test(f)).sort().pop();
+  if (!file) throw new Error('no preview built — run `npm run build` first');
+  const html = readFileSync(join(root, file), 'utf8');
   const dom = new JSDOM(html, {
     runScripts: 'dangerously',
     url: 'https://antonp02.github.io/Vig/',

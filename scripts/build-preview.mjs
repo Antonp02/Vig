@@ -15,7 +15,9 @@ html = html.replace('<link rel="stylesheet" href="styles.css" />',
   `<style>\n${readFileSync('styles.css', 'utf8')}\n</style>`);
 
 const data = {
+  VIG_NFL_PRESEASON_W2: JSON.parse(readFileSync('data/nfl-2026-preseason-w2.json', 'utf8')),
   VIG_NFL_WEEK1: JSON.parse(readFileSync('data/nfl-2026-week1.json', 'utf8')),
+  VIG_GOLF_OUTRIGHTS: JSON.parse(readFileSync('data/golf-outrights.json', 'utf8')),
   VIG_GOLF_EVENT: JSON.parse(readFileSync('data/golf-event.json', 'utf8'))
 };
 html = html.replace('<script src="config.js"></script>',

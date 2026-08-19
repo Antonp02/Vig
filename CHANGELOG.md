@@ -108,6 +108,61 @@ Three ways to close it:
 
 ---
 
+## v1.6.9 — Real preseason board
+
+**Added**
+
+- **NFL Preseason Week 2 — ten games, Aug 20–22**, transcribed from ESPN's odds
+  screens into `data/nfl-2026-preseason-w2.json`. Sportsbook, Home and Line
+  Winder all read the same file, so the board, trending picks and parlay builder
+  update together.
+- **Opening moneylines for both sides.** The Week 1 file only carried a current
+  price, so Line Winder had to draw a flat line for the away team. This slate has
+  open *and* current for both sides, making every line a real two-point move.
+- **Public bet percentages**, shown as a bar under each team on the Line Winder
+  matchup card — the first half of answering *why* a line moved. A market ESPN
+  showed no split for stores `null`, not `0`, so the card omits the bar instead
+  of drawing an empty one.
+- **The board now rolls slates by itself.** `BOARD_SLATES` lists the slates in
+  order and the app shows the earliest one with a game still to play. Preseason
+  W2 hands over to Week 1 after Aug 22 with no deploy.
+
+**Added — golf**
+
+- **BMW Championship outright board**, 30 golfers at Bellerive, Aug 20–23,
+  transcribed into `data/golf-outrights.json`. Winner market only, as asked:
+  one golfer, one price, to win the tournament.
+- **Golfers parlay like any other leg.** They enter the same `TRENDING` list the
+  tennis and soccer outrights use, so the bet slip, combined-odds maths and
+  ticket settlement pick them up with no special-casing.
+- **The "fair" price is now a real de-vig**, not a hand-picked number. Implied
+  probabilities are scaled so the book totals 100%, less a 3% slice reserved for
+  the 20 players in the 50-man field ESPN didn't list. The raw board is 11.9%
+  overround; that margin is what the edge chip now measures against.
+- The Open Championship and FedEx St. Jude rows are gone. Both tournaments have
+  been played — hardcoding a finished event is how a board goes stale.
+
+**Fixed — sign-in**
+
+- **"Failed to fetch" now explains itself.** That message is what a browser says
+  when a request never reached a server, and it reads identically whether the
+  project is paused, the device is offline, the CDN is blocked, or the URL is
+  wrong. The app now probes the auth server's own health endpoint on failure and
+  reports which of those it is, with the fix for each. Wrong-password,
+  provider-disabled and rate-limit errors are separated out too.
+
+**Notes**
+
+- SF at LAC is the showcase: the Chargers opened -123 and are now +105, a
+  228-cent swing that flips the favourite. Worth loading into Line Winder first.
+- 47 new assertions across `board.mjs` and `golf.mjs`, including a check that the
+  moneyline and spread pick the same favourite in all ten NFL games, and that the
+  de-vigged golf book totals under 100%. Both catch transcription slips. 147 total.
+- The test harness no longer pins a version number; it reads whichever preview
+  the build produced.
+
+---
+
 ## v1.6.8 — Brand mark dialled back
 
 **Changed**

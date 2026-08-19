@@ -804,3 +804,12 @@ button,select,input,a{touch-action:manipulation}
 .auth-brand{justify-content:center}
 .auth-logo{display:block;width:auto;height:40px;margin:0 auto}
 @media(max-width:620px){.brand-logo{height:30px}}
+
+/* v1.6.9 — public money split on the Line Winder matchup card. The bar is the
+   share of tickets on that side; a big bar next to a price that moved the
+   other way is the interesting case, so it sits right under the team name. */
+.pub-bar{display:block;height:4px;margin-top:7px;border-radius:999px;background:#0b111b;overflow:hidden;max-width:132px}
+.pub-bar i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),var(--accent-soft));border-radius:inherit}
+.pub-pct{display:block;margin-top:4px;color:var(--muted);font-size:10px}
+.ml-move.flat{color:var(--muted)}
+.real-tag{color:var(--accent)}
