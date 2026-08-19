@@ -108,6 +108,64 @@ Three ways to close it:
 
 ---
 
+## v1.7.7 — All-time performance, bankroll chart, advertising rail
+
+**Added — All-time performance (My Bets)**
+
+- A panel under the ticket list: all-time P/L, bets settled, wins, losses, hit
+  rate, best week, worst week, weeks played. Weekly resets do not touch it.
+- **Derived, not stored.** Two non-overlapping sources: the `lifetime`
+  accumulator written when a week is archived, plus the current week on top
+  because it has not been archived yet. A third stored total would be a third
+  thing to drift — the same mistake the v1.6.5 bankroll rewrite removed.
+- **Only graded bets count.** Open bets have not happened; push and void returned
+  the stake, so counting either as a win or a loss would misstate how the bettor
+  actually did. Hit rate is wins ÷ (wins + losses).
+- Best and worst week moved onto the accumulator rather than being read off
+  `weekResults`, which only holds twelve weeks — a record that quietly falls off
+  after three months is not a record.
+
+**Added — Weekly bankroll chart**
+
+- Hand-drawn SVG, like every other chart here, so it inherits the panel styling
+  and adds no dependency. Blue at or above $1,000, red below, gradient fill,
+  muted grid, and the $1,000 baseline dashed in accent because it is the only
+  gridline that means anything — everything is measured from it.
+- `week.ledger` records **when and why** each bankroll move happened, keyed so
+  it cannot be recorded twice. `week.history` is still maintained for existing
+  consumers; the ledger is the richer view of the same event, not a competitor.
+- **Idempotent by key.** Settling the same ticket twice, or a double run of the
+  settlement sweep, records one move. A settlement that nets zero — a push —
+  draws no point at all, rather than a flat step for every refund.
+- Weeks from before this release are redrawn from their settled tickets by
+  `rebuildLedger()`, so the chart is not blank on upgrade. The archive keeps the
+  ledger, closing bankroll and win/loss counts for later analytics.
+
+**Added — Advertising rail (Home only)**
+
+- A 160×600 skyscraper anchored left of the page shell, `position: fixed` so the
+  Home dashboard keeps its full width and nothing reflows when the ad appears.
+- Home only, and only above 1350px. Below that it is not shown — a skyscraper
+  squeezed onto a phone is worse than no advertisement.
+- **A slot, not a poster.** The creative is data (`HOME_AD`), so the rail can
+  later carry an affiliate book, a fantasy product or a paid sponsor with no
+  change to the Home layout. Fields for image, destination, campaign id and
+  impression/click tracking are already in the shape.
+- Impressions and clicks are counted locally and go nowhere. The shape is ready
+  for a backend; the backend is not pretended to exist.
+
+**Fixed**
+
+- An unparseable week key threw inside `archiveWeek()`. Archiving is the path
+  that refunds people's stakes, so it must never throw — it now falls back to
+  the current time. Found by the lifecycle suite.
+
+**Notes**
+
+- 48 new assertions. 381 total.
+
+---
+
 ## v1.7.6 — Tidy the stale rows in Postgres
 
 **Added**

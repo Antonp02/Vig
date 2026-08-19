@@ -50,6 +50,10 @@
   <div class="ticker-view"><div class="ticker-track" id="gameTicker"></div></div>
 </div>
 
+<!-- Advertising inventory. Rendered by AdSlot.render(); empty until then, and
+     empty on every view except Home. -->
+<aside class="ad-rail" id="adRail" hidden aria-label="Advertisement"></aside>
+
 <main class="page-shell">
   <section id="home" class="view active-view">
     <div class="hero-grid">
@@ -109,6 +113,21 @@
     <div class="bets-live"><span class="live-dot" id="betsLiveDot"></span><small id="betsUpdated">Not synced</small><button class="text-btn" id="betsRefresh">Refresh</button></div>
     <div class="filter-row bet-filters"><button class="bet-filter active" data-status="all">All</button><button class="bet-filter" data-status="open">Open</button><button class="bet-filter" data-status="won">Won</button><button class="bet-filter" data-status="lost">Lost</button><button class="bet-filter" data-status="push">Push</button></div>
     <section class="panel"><div id="betHistory" class="bet-history"></div></section>
+
+    <section class="panel alltime-panel">
+      <div class="panel-head"><div><span class="eyebrow">ALL-TIME PERFORMANCE</span>
+        <h2>Across every VIG week</h2>
+        <p class="muted-copy">Settled bets only. Weekly resets do not touch these.</p></div></div>
+      <div id="allTimeStats" class="alltime-grid"></div>
+    </section>
+
+    <section class="panel bankroll-panel">
+      <div class="panel-head"><div><span class="eyebrow">WEEKLY BANKROLL</span>
+        <h2>Bankroll movement</h2>
+        <p class="muted-copy">Throughout the current VIG week</p></div>
+        <div class="bankroll-now"><strong id="bankrollNow">$1,000.00</strong><small id="bankrollDelta">even</small></div></div>
+      <div id="bankrollChart" class="bankroll-chart"></div>
+    </section>
   </section>
 
   <section id="fantasy" class="view">

@@ -6,7 +6,7 @@
 
 /* Build stamp. Every "is this device on the new code?" question has cost a
    round trip; now it is on screen. Bumped with the service worker cache. */
-const VIG_BUILD = 'v1.7.6';
+const VIG_BUILD = 'v1.7.7';
 
 /* ---------- 0. Persistence ---------- */
 const KEYS = {
@@ -261,7 +261,8 @@ function fmtCountdown(ms) {
 }
 
 function blankWeek(key) {
-  return { key, bankroll: WEEKLY_BANKROLL, tickets: [], history: [WEEKLY_BANKROLL] };
+  return { key, bankroll: WEEKLY_BANKROLL, tickets: [], history: [WEEKLY_BANKROLL],
+           ledger: blankLedger(key ? new Date(String(key) + 'T04:00:00-04:00') : new Date()) };
 }
 
 /* ---------- 3. Week-scoped stats (FIX v0.8) -----------------
@@ -911,7 +912,11 @@ function ensureWeek() {
 }
 
 const BLANK_LIFETIME = { bets: 0, won: 0, lost: 0, push: 0, wagered: 0,
-                         profit: 0, weeks: 0, wins: 0, biggestWin: 0, bestFinish: 0 };
+                         profit: 0, weeks: 0, wins: 0, biggestWin: 0, bestFinish: 0,
+                         /* null, not 0 — before any week is archived there is no
+                            best or worst, and 0 would read as a break-even week
+                            that never happened */
+                         bestWeek: null, worstWeek: null };
 
 /* Lifetime totals are accumulated at archive time and never reset. The
    weekly bankroll is a format, not a record. */
@@ -929,8 +934,181 @@ function updateLifetime(w) {
     .reduce((m, t) => Math.max(m, payout(t) - t.stake), 0);
   lt.biggestWin = round2(Math.max(lt.biggestWin, best));
   lt.bestFinish = round2(Math.max(lt.bestFinish, s.bankroll));
+  /* Kept on the accumulator rather than read off weekResults, which only holds
+     the last 12 weeks — a record that quietly falls off after three months is
+     not a record. */
+  const pl = round2(s.realizedPL);
+  lt.bestWeek  = (lt.bestWeek  === null || lt.bestWeek  === undefined) ? pl : round2(Math.max(lt.bestWeek, pl));
+  lt.worstWeek = (lt.worstWeek === null || lt.worstWeek === undefined) ? pl : round2(Math.min(lt.worstWeek, pl));
   Store.set(KEYS.lifetime, lt);
   return lt;
+}
+
+/* ---------- Advertising slot (v1.7.7) -------------------------------
+   A slot, not a poster. The creative is data, so the same rail can later carry
+   an affiliate book, a fantasy product or a paid sponsor without anyone
+   touching the Home layout.
+
+   Nothing here talks to a network. `impressions` and `clicks` are counted
+   locally and go nowhere — the shape is ready for a backend, the backend is
+   not pretended to exist.
+------------------------------------------------------------------- */
+const HOME_AD = {
+  campaignId: 'vig-house-2026-08',
+  advertiser: 'VIG',
+  label: 'VIG PROMOTION',
+  headline: 'Think you know ball?',
+  body: 'Put your takes on the record.',
+  lines: ['$1,000 every week.', 'No real money.', 'All receipts.'],
+  cta: 'BUILD A SLIP',
+  targetView: 'parlay',       // the Sportsbook view id
+  image: null,
+  destination: null,          // external campaigns will set this instead
+  impressionTracking: true,
+  clickTracking: true
+};
+
+const AdSlot = {
+  creative: HOME_AD,
+  /* Home only, and only where a 160px column genuinely fits beside the content
+     rather than squeezing it. Below that the rail is not shown at all — a
+     skyscraper crushed onto a phone is worse than no advertisement. */
+  MIN_WIDTH: 1350,
+  eligible(viewId) {
+    if (viewId !== 'home') return false;
+    if (typeof window.matchMedia !== 'function') return false;
+    return window.matchMedia(`(min-width: ${this.MIN_WIDTH}px)`).matches;
+  },
+  count(kind) {
+    const key = `vig.v2.ad.${kind}.${this.creative.campaignId}`;
+    Store.set(key, (Number(Store.get(key, 0)) || 0) + 1);
+  },
+  render(viewId) {
+    const rail = document.getElementById('adRail');
+    if (!rail) return;
+    if (!this.eligible(viewId)) { rail.hidden = true; rail.innerHTML = ''; return; }
+    const c = this.creative;
+    rail.hidden = false;
+    rail.innerHTML = `<div class="ad-unit">
+      <span class="ad-label">${c.label}</span>
+      <div class="ad-mark">${c.advertiser}</div>
+      ${c.image ? `<img class="ad-img" src="${c.image}" alt="">` : ''}
+      <h3 class="ad-headline">${c.headline}</h3>
+      <p class="ad-body">${c.body}</p>
+      <ul class="ad-lines">${c.lines.map(l => `<li>${l}</li>`).join('')}</ul>
+      <button class="ad-cta" id="adCta">${c.cta}</button>
+    </div>`;
+    if (c.impressionTracking) this.count('impressions');
+    const btn = document.getElementById('adCta');
+    if (btn) btn.onclick = () => {
+      if (c.clickTracking) this.count('clicks');
+      if (c.destination) window.open(c.destination, '_blank', 'noopener');
+      else switchView(c.targetView);
+    };
+  }
+};
+
+/* ---------- All-time performance (v1.7.7) --------------------------
+   Derived, never stored as its own total. Two sources, and they do not
+   overlap: `lifetime` is the accumulator written when a week is ARCHIVED, and
+   the current week is added on top because it has not been archived yet. A
+   third stored total would be a third thing to drift.
+
+   Only graded bets count. Open bets have not happened, and push and void
+   returned the stake — counting either as a win or a loss would be a lie about
+   how the bettor actually did.
+------------------------------------------------------------------- */
+function allTimeStats() {
+  const lt = Object.assign({}, BLANK_LIFETIME, Store.get(KEYS.lifetime, null) || {});
+  const cur = week ? weekStats(week) : null;
+  const curT = (week && week.tickets) || [];
+
+  const curWon  = curT.filter(t => t.status === 'won').length;
+  const curLost = curT.filter(t => t.status === 'lost').length;
+  const curPL   = cur ? cur.realizedPL : 0;
+
+  const won   = lt.won + curWon;
+  const lost  = lt.lost + curLost;
+  const graded = won + lost;
+  const profit = round2(lt.profit + curPL);
+
+  /* The running week counts toward best/worst only once it has a result, or an
+     untouched week would show as a record -0.00. */
+  const hasCur = (curWon + curLost) > 0;
+  const best  = [lt.bestWeek,  hasCur ? round2(curPL) : null].filter(v => v !== null && v !== undefined);
+  const worst = [lt.worstWeek, hasCur ? round2(curPL) : null].filter(v => v !== null && v !== undefined);
+
+  return {
+    profit,
+    bets: lt.bets + curT.length,
+    graded, won, lost,
+    voided: lt.push + curT.filter(t => t.status === 'push' || t.status === 'void').length,
+    open: curT.filter(t => t.status === 'open').length,
+    hitRate: graded ? Math.round((won / graded) * 100) : 0,
+    wagered: round2(lt.wagered + (cur ? cur.wagered : 0)),
+    weeks: lt.weeks + (hasCur ? 1 : 0),
+    bestWeek:  best.length  ? Math.max(...best)  : null,
+    worstWeek: worst.length ? Math.min(...worst) : null,
+    biggestWin: lt.biggestWin
+  };
+}
+
+/* ---------- Bankroll ledger (v1.7.7) -------------------------------
+   week.history was a bare array of numbers: no time, no cause, and no way to
+   tell one settlement from the same settlement run twice. The ledger keeps the
+   same series but records WHEN and WHY each move happened, keyed so a repeat
+   cannot be recorded twice.
+
+   week.history is still maintained, because other code reads it. The ledger is
+   the richer view, not a competing one — both are derived from the same event.
+------------------------------------------------------------------- */
+function blankLedger(at) {
+  /* A week key that will not parse must not take the archive down with it —
+     archiving is the path that refunds people's stakes. Fall back to now. */
+  const d = (at instanceof Date && !isNaN(at)) ? at : new Date();
+  return [{ key: 'week_start', at: d.toISOString(),
+            bankroll: WEEKLY_BANKROLL, reason: 'week_start' }];
+}
+
+/* Append a point. `key` makes it idempotent: settling the same ticket twice,
+   or a double-run of the settlement sweep, records one move. */
+function recordBankroll(reason, key, at) {
+  if (!week) return null;
+  if (!Array.isArray(week.ledger) || !week.ledger.length) week.ledger = blankLedger();
+  const id = `${reason}:${key || ''}`;
+  if (week.ledger.some(p => p.key === id)) return null;      // already recorded
+  const bankroll = round2(derivedBankroll(week));
+  const last = week.ledger[week.ledger.length - 1];
+  /* A settlement that moved no money is not a price change. Skip it rather
+     than drawing a flat step for every push. */
+  if (last && Math.abs(last.bankroll - bankroll) < 0.005 && reason !== 'week_start') return null;
+  const point = { key: id, at: (at || new Date()).toISOString(), bankroll, reason };
+  if (key) point.ticketId = key;
+  week.ledger.push(point);
+  if (week.ledger.length > 400) week.ledger.splice(1, week.ledger.length - 400);
+  /* keep the legacy series in step for existing consumers */
+  if (!Array.isArray(week.history)) week.history = [WEEKLY_BANKROLL];
+  week.history.push(bankroll);
+  if (week.history.length > 40) week.history.shift();
+  return point;
+}
+
+/* Every settled ticket, in the order it settled, as bankroll points. Used to
+   rebuild a ledger for a week that predates v1.7.7. */
+function rebuildLedger(w) {
+  const start = blankLedger(new Date(String((w && w.key) || '') + 'T04:00:00-04:00'));
+  const settled = (w.tickets || [])
+    .filter(t => t.status !== 'open' && t.settledAt)
+    .sort((a, b) => Date.parse(a.settledAt) - Date.parse(b.settledAt));
+  let running = WEEKLY_BANKROLL - (w.tickets || []).reduce((a, t) => a + (Number(t.stake) || 0), 0);
+  /* replay: start from all stakes committed, then add each payout back */
+  const pts = [];
+  settled.forEach(t => {
+    running = round2(running + realizedReturn(t));
+    pts.push({ key: `ticket_settled:${t.id}`, at: t.settledAt, bankroll: running,
+               reason: 'ticket_settled', ticketId: t.id });
+  });
+  return start.concat(pts);
 }
 
 function archiveWeek(w) {
@@ -950,6 +1128,11 @@ function archiveWeek(w) {
   weekResults.unshift({
     key: w.key, profit: s.realizedPL, hitRate: s.hitRate, betsUsed: s.betsUsed,
     roi: s.roi, wagered: s.wagered,
+    /* the shape of the week, kept so all-time analytics can redraw it later */
+    closingBankroll: round2(derivedBankroll(w)),
+    won: w.tickets.filter(t => t.status === 'won').length,
+    lost: w.tickets.filter(t => t.status === 'lost').length,
+    ledger: (Array.isArray(w.ledger) && w.ledger.length > 1) ? w.ledger : rebuildLedger(w),
     bestTicket: best ? { legs: best.legs.length, odds: best.odds, profit: round2(payout(best) - best.stake) } : null
   });
   if (weekResults.length > 12) weekResults.pop();
@@ -993,6 +1176,7 @@ function switchView(id) {
   document.querySelectorAll('.mobile-nav-btn').forEach(b =>
     b.classList.toggle('active', b.dataset.view === id));
   updateNavBadges();
+  AdSlot.render(id);          // Home only; hides itself everywhere else
   if (id === 'bets') { renderBets(activeBetFilter()); renderBetsLive();
     if (openTickets().length) refreshTickets({ quiet: true }); }
   if (id === 'friends' || id === 'leaderboard') renderCompetition();
@@ -1254,8 +1438,7 @@ function settleOpenTickets() {
     credited += realizedReturn(t);
   });
   week.bankroll = derivedBankroll(week);
-  week.history.push(round2(week.bankroll));
-  if (week.history.length > 40) week.history.shift();
+  recordBankroll('ticket_settled', open.map(t => t.id).join('+'));
   persist();
   updateDashboard();
   renderBets(activeBetFilter());
@@ -1325,7 +1508,93 @@ function betLabel(t) {
   return n === 1 ? 'Straight bet' : `${n}-leg parlay`;
 }
 
+/* ---------- All-time panel + weekly bankroll chart (v1.7.7) --------
+   SVG drawn by hand, like every other chart here — no charting dependency,
+   and it inherits the panel styling for free. */
+function renderAllTime() {
+  const box = document.getElementById('allTimeStats');
+  if (!box) return;
+  const a = allTimeStats();
+  const money0 = n => `${n >= 0 ? '+' : '-'}$${Math.abs(round2(n)).toLocaleString(undefined,
+    { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const cell = (label, value, cls) =>
+    `<div class="at-cell"><span>${label}</span><strong class="${cls || ''}">${value}</strong></div>`;
+
+  box.innerHTML =
+    cell('All-time P/L', a.graded ? money0(a.profit) : '—', a.profit > 0 ? 'positive' : a.profit < 0 ? 'negative' : '') +
+    cell('Bets settled', a.graded) +
+    cell('Wins', a.won) +
+    cell('Losses', a.lost) +
+    cell('Hit rate', a.graded ? `${a.hitRate}%` : '—') +
+    cell('Best week', a.bestWeek === null ? '—' : money0(a.bestWeek), a.bestWeek > 0 ? 'positive' : '') +
+    cell('Worst week', a.worstWeek === null ? '—' : money0(a.worstWeek), a.worstWeek < 0 ? 'negative' : '') +
+    cell('Weeks played', a.weeks);
+}
+
+function renderBankrollChart() {
+  const box = document.getElementById('bankrollChart');
+  if (!box || !week) return;
+
+  let pts = Array.isArray(week.ledger) && week.ledger.length ? week.ledger.slice() : null;
+  if (!pts) { week.ledger = rebuildLedger(week); pts = week.ledger.slice(); }
+  const now = round2(derivedBankroll(week));
+  const last = pts[pts.length - 1];
+  /* the live tail: where the bankroll stands right now, stakes included */
+  if (!last || Math.abs(last.bankroll - now) > 0.005) {
+    pts.push({ key: 'now', at: new Date().toISOString(), bankroll: now, reason: 'current' });
+  }
+
+  const head = document.getElementById('bankrollNow');
+  const delta = document.getElementById('bankrollDelta');
+  if (head) head.textContent = money(now);   /* money() already carries the $ */
+  if (delta) {
+    const d = round2(now - WEEKLY_BANKROLL);
+    delta.textContent = d === 0 ? 'even' : `${d > 0 ? '+' : '−'}${money(Math.abs(d))} this week`;
+    delta.className = d > 0 ? 'positive' : d < 0 ? 'negative' : '';
+  }
+
+  const up = now >= WEEKLY_BANKROLL;
+  const stroke = up ? 'var(--accent)' : 'var(--red)';
+  const W = 760, H = 220, pad = { l: 54, r: 16, t: 16, b: 28 };
+  const vals = pts.map(p => p.bankroll).concat([WEEKLY_BANKROLL]);
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  if (hi - lo < 80) { const mid = (hi + lo) / 2; lo = mid - 40; hi = mid + 40; }
+  const padY = (hi - lo) * 0.12;
+  lo -= padY; hi += padY;
+
+  const x = i => pad.l + (pts.length === 1 ? 0 : i * (W - pad.l - pad.r) / (pts.length - 1));
+  const y = v => pad.t + (hi - v) * (H - pad.t - pad.b) / (hi - lo);
+
+  /* four gridlines, plus the $1,000 baseline which is the only one that means
+     anything — everything is measured from it */
+  const ticks = [lo + (hi - lo) * 0.15, WEEKLY_BANKROLL, hi - (hi - lo) * 0.15]
+    .filter((v, i, arr) => arr.indexOf(v) === i);
+
+  const line = pts.map((p, i) => `${x(i)},${y(p.bankroll)}`).join(' ');
+  const area = `${pad.l},${y(lo)} ${line} ${x(pts.length - 1)},${y(lo)}`;
+
+  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" class="bk-svg" role="img"
+      aria-label="Bankroll through the current VIG week, currently ${money(now)}">
+    <defs><linearGradient id="bkFill" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="${up ? '#4d8dff' : '#ff5f6d'}" stop-opacity=".26"/>
+      <stop offset="1" stop-color="${up ? '#4d8dff' : '#ff5f6d'}" stop-opacity="0"/>
+    </linearGradient></defs>
+    ${ticks.map(v => `<line class="bk-grid ${Math.abs(v - WEEKLY_BANKROLL) < 0.01 ? 'bk-base' : ''}"
+        x1="${pad.l}" x2="${W - pad.r}" y1="${y(v)}" y2="${y(v)}"/>
+      <text class="bk-axis" x="${pad.l - 8}" y="${y(v) + 4}" text-anchor="end">$${Math.round(v).toLocaleString()}</text>`).join('')}
+    <polygon class="bk-area" points="${area}"/>
+    <polyline class="bk-line" stroke="${stroke}" points="${line}"/>
+    ${pts.map((p, i) => `<circle class="bk-dot" cx="${x(i)}" cy="${y(p.bankroll)}"
+        r="${i === pts.length - 1 ? 5 : 3}" fill="${stroke}"><title>${money(p.bankroll)} · ${
+          p.reason.replace(/_/g, ' ')}</title></circle>`).join('')}
+    <text class="bk-axis" x="${pad.l}" y="${H - 8}">Week start</text>
+    <text class="bk-axis" x="${W - pad.r}" y="${H - 8}" text-anchor="end">Now</text>
+  </svg>`;
+}
+
 function renderBets(status = 'all') {
+  renderAllTime();
+  renderBankrollChart();
   const data = week.tickets.filter(t => status === 'all' || t.status === status);
   document.getElementById('betHistory').innerHTML = data.length ? data.map(t =>
     `<article class="bet-card">
@@ -3141,6 +3410,7 @@ async function autoSettleFromScores({ quiet = false } = {}) {
     t.settledBy = 'scores';
     t.settleNote = p.reason;
     applied++;
+    recordBankroll('ticket_settled', t.id);
     if (cloud) Outbox.addSettlement && Outbox.addSettlement(t, week.key);
   });
   if (applied) {
@@ -4061,6 +4331,18 @@ async function initCompare() {
     renderComparePickers();
     renderCompare();
     safely('ticker', renderTicker);
+    safely('ad slot', () => {
+      const active = document.querySelector('.view.active-view');
+      AdSlot.render(active ? active.id : 'home');
+      let t = null;
+      window.addEventListener('resize', () => {
+        clearTimeout(t);
+        t = setTimeout(() => {
+          const v = document.querySelector('.view.active-view');
+          AdSlot.render(v ? v.id : 'home');
+        }, 200);
+      });
+    });
     safely('auto-settle', () => autoSettleFromScores({ quiet: true }));
     safely('projections', () => { Fantasy.projCoverage = mergeProjections(); });
     if (buildDraftPool() && !draftState) renderDraft();
@@ -4437,8 +4719,7 @@ function settleGolfEvent(winnerId, { push = false } = {}) {
     t.settledAt = new Date().toISOString();
   });
   week.bankroll = derivedBankroll(week);
-  week.history.push(round2(week.bankroll));
-  if (week.history.length > 40) week.history.shift();
+  recordBankroll('event_settled', `${GolfEvent.data && GolfEvent.data.eventId}:${winnerId || 'push'}`);
   GolfEvent.setState({ status: 'final', winner: push ? null : winnerId, settledAt: new Date().toISOString() });
   persist();
   return { settled: open.length, paid: round2(paid) };
@@ -6085,6 +6366,9 @@ window.VIG = {
                get cloudBoard() { return cloudBoard; },
                updateLifetime, AUTO_ROLLOVER, renderGolfEvent, renderAdmin,
                ensureWeek, archiveWeek, blankWeek, potentialReturn,
+               setWeek: w => { week = w; },
+               allTimeStats, recordBankroll, rebuildLedger, renderAllTime, renderBankrollChart,
+               AdSlot, HOME_AD,
                ROSTER_SLOTS, DRAFT_ROUNDS, assignSlot, ordinal, buildDraftPool,
                gradeDraft, letterFor, slotLetterFor, GRADE_SCALE, SLOT_SCALE, POSITION_LIMITS, positionWeights, DRAFT_DEPTH,
                ROUND_WEIGHTS, roundWeight, closingMessage, renderTicker, fmtGameTime,

@@ -825,3 +825,65 @@ button,select,input,a{touch-action:manipulation}
 .feed-note-mini{margin:12px 0 0;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
 .feed-note-mini.feed-live{color:#7ee0a8}
 .feed-note-mini.feed-snapshot,.feed-note-mini.feed-captured,.feed-note-mini.feed-checking{color:var(--muted)}
+
+/* ---- v1.7.7 All-time performance + weekly bankroll chart -------------
+   Deliberately quieter than the weekly strip above it: this is a record, not
+   a live number, and it should read as reference rather than compete with the
+   tickets for attention. */
+.alltime-panel,.bankroll-panel{margin-top:20px}
+.alltime-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:20px}
+.at-cell{background:rgba(255,255,255,.02);border:1px solid var(--line);border-radius:13px;padding:14px 16px;min-height:72px;display:flex;flex-direction:column;justify-content:center}
+.at-cell span{display:block;color:var(--muted);font-size:10px;letter-spacing:.06em;text-transform:uppercase}
+.at-cell strong{display:block;margin-top:7px;font-size:19px;letter-spacing:-.02em}
+.bankroll-now{text-align:right;white-space:nowrap}
+.bankroll-now strong{display:block;font-size:26px;letter-spacing:-.03em}
+.bankroll-now small{display:block;margin-top:4px;font-size:11px;color:var(--muted)}
+.bankroll-now small.positive{color:var(--accent)}
+.bankroll-now small.negative{color:var(--red)}
+.bankroll-chart{margin-top:20px}
+.bk-svg{width:100%;height:auto;overflow:visible;display:block}
+.bk-grid{stroke:var(--line);stroke-width:1;opacity:.55}
+/* the $1,000 line is the only one that means anything — everything is measured
+   from it, so it gets the accent and the others stay out of the way */
+.bk-base{stroke:var(--accent-soft);opacity:.4;stroke-dasharray:4 5}
+.bk-axis{fill:var(--muted);font-size:10px}
+.bk-area{fill:url(#bkFill)}
+.bk-line{fill:none;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
+.bk-dot{stroke:#0b1019;stroke-width:2}
+@media(max-width:760px){
+  .alltime-grid{grid-template-columns:repeat(2,1fr)}
+  .bankroll-now{text-align:left}
+  .at-cell{min-height:66px}
+}
+@media(max-width:400px){.at-cell strong{font-size:17px}}
+
+/* ---- v1.7.7 Advertising rail ----------------------------------------
+   Anchored to the left of the centred page shell rather than placed in the
+   flow, so the Home dashboard keeps its full width and nothing reflows when
+   the ad appears or goes away. Hidden below 1350px: a 160px skyscraper
+   squeezed onto a narrow screen is worse than no advertisement. */
+.ad-rail{display:none}
+@media(min-width:1350px){
+  .ad-rail{display:block;position:fixed;top:120px;
+    /* half the viewport, minus half the shell, minus the unit and a gutter */
+    left:calc(50% - (min(1180px,92vw) / 2) - 190px);
+    width:160px;z-index:5}
+  .ad-rail[hidden]{display:none}
+}
+.ad-unit{position:sticky;top:120px;width:160px;min-height:600px;padding:16px 14px;
+  border:1px solid var(--line);border-radius:16px;display:flex;flex-direction:column;
+  background:radial-gradient(circle at 50% 0%,rgba(40,117,203,.22),transparent 58%),
+             linear-gradient(180deg,#111a29,#0b111b);
+  box-shadow:0 18px 44px rgba(0,0,0,.34)}
+.ad-label{display:block;font-size:8px;letter-spacing:.16em;color:var(--muted);
+  text-transform:uppercase;text-align:center;margin-bottom:22px}
+.ad-mark{font-size:26px;font-weight:900;letter-spacing:-.06em;color:var(--text);
+  text-align:center;margin-bottom:26px;text-shadow:0 0 26px rgba(40,117,203,.5)}
+.ad-img{width:100%;border-radius:10px;margin-bottom:16px}
+.ad-headline{font-size:19px;line-height:1.2;letter-spacing:-.03em;margin:0 0 10px}
+.ad-body{margin:0 0 20px;font-size:12px;line-height:1.5;color:var(--muted)}
+.ad-lines{list-style:none;margin:0 0 auto;padding:0;display:grid;gap:7px}
+.ad-lines li{font-size:13px;font-weight:700;line-height:1.3}
+.ad-cta{margin-top:22px;width:100%;min-height:44px;border:0;border-radius:10px;
+  background:var(--accent);color:#08101a;font-weight:800;font-size:11px;letter-spacing:.07em}
+.ad-cta:hover{filter:brightness(1.08)}
