@@ -48,10 +48,10 @@ alter table public.odds_budget enable row level security;
 -- Claim one credit for today. Returns the new count, or null if the cap is
 -- already reached. Atomic: the insert-or-update and the test happen in one
 -- statement, so two callers cannot both see the last credit as free.
--- SUPERSEDED IN v1.7.1 — this version did not enforce the cap.
+-- SUPERSEDED IN v1.7.4 — this version did not enforce the cap.
 -- At used = p_cap the CASE held the value, RETURNING yielded p_cap, and
 -- `p_cap > p_cap` was false, so it returned a valid-looking credit forever.
--- The corrected function is in 2026-08-19_v1.7.1_quota_cap_fix.sql and is
+-- The corrected function is in 2026-08-19_v1.7.4_quota_cap_fix.sql and is
 -- reproduced here so a fresh install from this file alone is still correct.
 create or replace function public.claim_odds_credit(p_cap integer)
 returns integer

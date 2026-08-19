@@ -1,4 +1,4 @@
-# VIG v1.7.1 — Deployment guide
+# VIG v1.7.4 — Deployment guide
 
 **Nothing is live yet, and I have not verified anything against your project.**
 I have no credentials for it and no network access to it. Everything below is a
@@ -14,7 +14,7 @@ Four parts:
 
 1. **Quota-cap fix** — one SQL file, browser only (5 min) — **do this first**
 2. **Verify the endpoint** — the checks from your handoff (10 min)
-3. **Frontend** — push v1.7.1 to GitHub (5 min)
+3. **Frontend** — push v1.7.4 to GitHub (5 min)
 4. **Turn Live on for everyone** — one config line
 
 ---
@@ -39,7 +39,7 @@ without any warning. **Fix this before anything else touches the endpoint.**
 ### 1.1 Run the corrected function
 
 Dashboard → **SQL Editor** → **New query**. Paste all of
-`supabase/migrations/2026-08-19_v1.7.1_quota_cap_fix.sql` and click **Run**.
+`supabase/migrations/2026-08-19_v1.7.4_quota_cap_fix.sql` and click **Run**.
 
 The file does two things: replaces the function, then runs a self-test.
 
@@ -148,7 +148,7 @@ tell me.
 
 ### 3.1 Copy the files in
 
-Unzip **VIG v1.7.1 Source.zip** and copy its contents over your repo folder,
+Unzip **VIG v1.7.4 Source.zip** and copy its contents over your repo folder,
 replacing existing files.
 
 `config.js` in the zip is identical to the one in your repo, so it's safe either
@@ -158,7 +158,7 @@ way.
 
 ```bash
 git add -A
-git commit -m "v1.7.1 — odds proxy, FanDuel snapshot, reset to Tue 04:00 ET"
+git commit -m "v1.7.4 — odds proxy, FanDuel snapshot, reset to Tue 04:00 ET"
 git push
 ```
 
@@ -173,7 +173,7 @@ GitHub Pages takes 1–2 minutes to rebuild.
 
 Go to `https://antonp02.github.io/Vig/?admin=1`.
 
-**The Build line must read `v1.7.1`.**
+**The Build line must read `v1.7.4`.**
 
 Still says v1.6.x? The old service worker is holding on. Close *every* VIG tab
 on that device and reopen. This is the single most common reason a deploy looks
@@ -206,7 +206,7 @@ window.VIG_CONFIG = {
   DATA_SOURCE: 'live',    // <- this line
 ```
 
-It already reads `'live'` in the v1.7.1 zip, so pushing Part 3 turns it on for
+It already reads `'live'` in the v1.7.4 zip, so pushing Part 3 turns it on for
 every visitor on their next load. **If Part 2 did not pass, change it to
 `'mock'` before pushing.**
 

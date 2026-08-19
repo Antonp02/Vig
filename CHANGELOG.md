@@ -108,7 +108,66 @@ Three ways to close it:
 
 ---
 
-## v1.7.1 — Quota cap actually caps; Live for everyone
+## v1.7.6 — Tidy the stale rows in Postgres
+
+**Added**
+
+- `void_stale_bets()` — an admin cleanup for bets still sitting at `status =
+  'open'` in the database from weeks that have already closed. The client
+  archived those weeks locally, but RLS rightly forbids a user updating their own
+  bets, so the server never heard. They harm no bankroll — bets are scoped per
+  week — but "open" is not true of a game played weeks ago, and it skews
+  `admin_stats` and any historical query.
+- **They are voided, not lost.** A ticket nobody graded means the book failed,
+  not the bettor, so the stake goes back. Deciding winners is the settlement
+  path's job, not a cleanup script's.
+- `stale_open_bets()` previews the damage first, and `void_stale_bets(false)` is
+  a dry run. Admin-only, and it cannot touch the current week: the filter is
+  `week_key < vig_week_key()`, and the running week is never less than itself.
+- `vig_week_key()` computes Tuesday 04:00 America/New_York in SQL. It has to
+  agree with `weekKeyFor()` exactly or the cleanup could void live bets —
+  `tests/weekkeysql.mjs` checks the two against each other across 1,460 samples
+  over a year, including both DST switches and the 03:59/04:00 boundary.
+
+**Notes**
+
+- 6 new assertions. 333 total.
+
+---
+
+## v1.7.5 — The week actually rolls
+
+**Fixed — the bankroll did not reset on Tuesday**
+
+- `AUTO_ROLLOVER` was still `false`. It was set that way during development so a
+  week could not roll out from under a test in progress, and it never got turned
+  back on. `ensureWeek()` computed Tuesday's new week key correctly and then
+  declined to act on it — the reset logic was right, it just wasn't allowed to
+  run. **Now on.**
+- This also clears the stuck tickets. The week that never closed gets archived on
+  the next load: ungraded tickets are **voided and their stakes refunded**, the
+  lifetime record carries forward, and a fresh $1,000 week begins. Nothing is
+  confiscated for having sat open.
+
+**Changed — the Founders event is gone from Trending**
+
+- The card, the admin panel, and the tab copy that promised "the live golf event
+  runs on real bet-slip mechanics". The Trending subtitle now describes what is
+  actually there: a captured golf snapshot, plus simulated tennis and soccer.
+- `renderAdmin()` now empties and hides the panel outright when `admin` is not in
+  the URL, so it cannot occupy space or catch a stray tap on a phone.
+
+**Notes**
+
+- 19 new assertions covering the roll: a stale week closes, ungraded tickets
+  refund rather than lose, the new week starts at the full bankroll, and lifetime
+  totals survive. 327 total.
+- Settlement from final scores shipped in v1.7.4 but has never run against a real
+  finished game — the preseason slate starts Thursday.
+
+---
+
+## v1.7.4 — Quota cap, Live for everyone, and bets that settle
 
 **Fixed — the daily cap never blocked anything**
 
@@ -122,7 +181,7 @@ Three ways to close it:
 - A cap of zero or less now returns null on the INSERT path too. `ON CONFLICT …
   WHERE` guards only the UPDATE, so the first call of the day would otherwise
   have been granted regardless.
-- `2026-08-19_v1.7.1_quota_cap_fix.sql` carries an in-database self-test that
+- `2026-08-19_v1.7.4_quota_cap_fix.sql` carries an in-database self-test that
   proves claim 16 returns null and leaves `used` at 15, then rolls back. The
   v1.7.0 migration was corrected in place so a fresh install from it alone is
   also correct.
@@ -209,13 +268,13 @@ Three ways to close it:
 - BMW: heading **BMW Championship — Winner**, badge **FanDuel snapshot**,
   note **Updated Aug. 19, 2026 at 11:42 p.m. ET**, all 30 golfers, outright-win,
   parlay-able, and no "Live" label unless a real matching feed exists.
-- Service worker and build tag bumped to `v1.7.1` so devices don't stay on 1.7.0.
+- Service worker and build tag bumped to `v1.7.4` so devices don't stay on 1.7.0.
 
 **Notes**
 
 - 90 new assertions. 308 total.
 - Nothing is live. The endpoint, cache, CORS and budget checks in
-  `docs/DEPLOY_v1.7.1.md` have not been run.
+  `docs/DEPLOY_v1.7.4.md` have not been run.
 
 ---
 

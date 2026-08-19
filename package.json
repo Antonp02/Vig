@@ -1,10 +1,10 @@
 {
   "name": "vig-mock-sportsbook",
-  "version": "1.7.1",
+  "version": "1.7.6",
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node scripts/build-preview.mjs v1.7.1",
+    "build": "node scripts/build-preview.mjs v1.7.6",
     "test": "npm run build && node tests/run.mjs"
   },
   "devDependencies": {

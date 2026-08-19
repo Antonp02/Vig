@@ -1,5 +1,5 @@
 -- ============================================================
--- VIG v1.7.1 — fix the daily quota cap
+-- VIG v1.7.4 — fix the daily quota cap
 --
 -- Safe to run more than once. Run after the v1.7.0 migration.
 --

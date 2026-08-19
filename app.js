@@ -6,7 +6,7 @@
 
 /* Build stamp. Every "is this device on the new code?" question has cost a
    round trip; now it is on screen. Bumped with the service worker cache. */
-const VIG_BUILD = 'v1.7.1';
+const VIG_BUILD = 'v1.7.6';
 
 /* ---------- 0. Persistence ---------- */
 const KEYS = {
@@ -14,7 +14,7 @@ const KEYS = {
   results:   'vig.v2.results',
   snapshots: 'vig.v2.snapshots',
   drafts:    'vig.v2.drafts',
-  mode:      'vig.v2.mode',            // legacy, migrated away in v1.7.1
+  mode:      'vig.v2.mode',            // legacy, migrated away in v1.7.4
   modeOverride: 'vig.v2.mode.override',
   modeMigrated: 'vig.v2.mode.migrated171',
   golf:      'vig.v2.golf',
@@ -170,7 +170,13 @@ const median = arr => {
 /* Paused during the private test so a rollover cannot wipe results
    mid-session. The admin panel exposes Finalize Week / Start New Week
    instead. Flip to true for normal operation. */
-const AUTO_ROLLOVER = false;
+/* v1.7.5: ON. This was false through development so a week never rolled out
+   from under a test in progress. That is exactly why the bankroll did not reset
+   on Tuesday — ensureWeek() computed the new week correctly and then declined to
+   act on it. The board is real now and the reset has to be automatic, because a
+   competition that only advances when the owner remembers to press a button is
+   not a weekly competition. */
+const AUTO_ROLLOVER = true;
 
 const WEEKLY_BANKROLL = 1000;
 const WEEKLY_BET_LIMIT = 25;
@@ -355,7 +361,7 @@ const MOCK_BASE = [
      2. the captured slate — real teams, real transcribed prices
      3. MOCK_BASE — invented games, only if no slate loaded
 
-   v1.7.1: step 2 was missing. A failing feed dropped straight to invented
+   v1.7.4: step 2 was missing. A failing feed dropped straight to invented
    fixtures even though a captured board of the actual week's games was sitting
    in memory. Real games at a slightly old price beat imaginary games. */
 function fallbackGames() {
@@ -481,7 +487,7 @@ function bookSpread(team) {
   return round2((Math.max(...probs) - Math.min(...probs)) * 100);
 }
 
-/* ---------- Data source mode (v1.7.1) ----------------------------
+/* ---------- Data source mode (v1.7.4) ----------------------------
    What the deploy says, unless this device deliberately said otherwise.
 
    VIG_CONFIG.DATA_SOURCE is the production switch: change it, push, and every
@@ -499,7 +505,7 @@ function resolveDataMode() {
   return configuredDataMode();
 }
 
-/* One-time, idempotent. Everyone who used VIG before v1.7.1 has
+/* One-time, idempotent. Everyone who used VIG before v1.7.4 has
    vig.v2.mode = 'mock' sitting in localStorage — not because they chose it, but
    because that was the old default. Left alone it would pin them to simulated
    prices permanently. So the legacy key is retired: a stored 'live' is honoured
@@ -525,7 +531,7 @@ function migrateDataMode() {
 migrateDataMode();
 
 const DataSource = {
-  /* v1.7.1: the mode used to be read straight from localStorage with a 'mock'
+  /* v1.7.4: the mode used to be read straight from localStorage with a 'mock'
      default, which made it a per-browser setting. Switching the admin device to
      Live left every other user, and every other device, on simulated prices
      forever — there was no way to turn the product on.
@@ -2953,7 +2959,7 @@ function tickerWhen(iso) {
   }).format(d).replace(',', '');
 }
 
-/* v1.7.1: the ticker used to read the fantasy schedule file, which is pinned to
+/* v1.7.4: the ticker used to read the fantasy schedule file, which is pinned to
    Week 1 — so it announced "Sunday, Sep 13" while the board showed preseason
    games three weeks sooner. It now reads the same slate as the board, so the two
    can never disagree and the ticker rolls forward on its own. */
@@ -2994,7 +3000,7 @@ function renderTicker() {
   if (el) el.textContent = `${count} game${count === 1 ? '' : 's'}`;
 }
 
-/* ---------- 12a2. Settlement from real results (v1.7.1) -------------
+/* ---------- 12a2. Settlement from real results (v1.7.4) -------------
    Open tickets sat open forever: nothing in the app could learn that a game
    had finished. With the scores feed it can.
 
@@ -4197,7 +4203,7 @@ function pendingSettlement() {
     && t.eventId === GolfEvent.data.eventId);
 }
 
-/* v1.7.1: the VIG Founders Invitational is over, and a finished private test
+/* v1.7.4: the VIG Founders Invitational is over, and a finished private test
    event has no business on a public tab. It stays reachable under ?admin=1 so
    any ungraded tickets can still be settled — removing the card must not strand
    somebody's stake. Live events show for everyone as before. */
@@ -4447,7 +4453,7 @@ function settleGolfEvent(winnerId, { push = false } = {}) {
    confirms first and settlement is idempotent.
    ============================================================ */
 const Admin = {
-  /* v1.7.1: this used to LATCH. One visit to ?admin=1 wrote vig.v2.admin=true
+  /* v1.7.4: this used to LATCH. One visit to ?admin=1 wrote vig.v2.admin=true
      and the settlement controls then appeared on every load forever, for that
      browser, with no way to put them away short of clearing storage. Test
      controls sitting permanently on the page is not a beta, it's a bug.
@@ -4621,6 +4627,12 @@ function renderSyncReport(rep) {
 }
 
 function renderAdmin() {
+  /* Belt and braces on the URL gate: if admin is not in the URL the panel is
+     emptied and hidden, so it cannot take up space or catch a stray tap. */
+  {
+    const p = document.getElementById('adminPanel');
+    if (p && !Admin.enabled()) { p.innerHTML = ''; p.hidden = true; return; }
+  }
   const box = document.getElementById('adminPanel');
   if (!box) return;
   if (!Admin.enabled() || !GolfEvent.data) { box.hidden = true; return; }
@@ -6072,6 +6084,7 @@ window.VIG = {
                ticketFingerprint, dedupeTickets, renderBets, activeBetFilter, WEEKLY_BET_LIMIT, WEEKLY_BANKROLL, week, renderProfileCard, avatarOf, AVATAR_COLORS, renderHeaderAvatar, renderHomeGames,
                get cloudBoard() { return cloudBoard; },
                updateLifetime, AUTO_ROLLOVER, renderGolfEvent, renderAdmin,
+               ensureWeek, archiveWeek, blankWeek, potentialReturn,
                ROSTER_SLOTS, DRAFT_ROUNDS, assignSlot, ordinal, buildDraftPool,
                gradeDraft, letterFor, slotLetterFor, GRADE_SCALE, SLOT_SCALE, POSITION_LIMITS, positionWeights, DRAFT_DEPTH,
                ROUND_WEIGHTS, roundWeight, closingMessage, renderTicker, fmtGameTime,
