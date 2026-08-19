@@ -108,6 +108,54 @@ Three ways to close it:
 
 ---
 
+## v1.7.0 — Live odds, with the key server-side
+
+**Added**
+
+- **`supabase/functions/odds`** — a Deno Edge Function that proxies The Odds API.
+  The key lives in Edge Function Secrets as `ODDS_API_KEY` and never reaches the
+  browser: no key in `config.js`, none in the bundle, and the client never learns
+  the upstream hostname. `tests/oddsproxy.mjs` fails if that ever stops being true.
+- **A shared cache, because the quota is the real constraint.** The free tier is
+  500 credits a month (~16/day) and a naive proxy costs one credit *per visitor
+  per page load* — three friends would drain the month in a week. The function
+  serves `public.odds_cache` and calls upstream only when the row is stale and
+  the day's budget has room. A thousand visitors cost the same as one.
+- **Adaptive TTL.** Prices barely move days out and move constantly near kickoff,
+  so a game within six hours drops the TTL to 15 minutes; otherwise it's three
+  hours. Eight upstream calls on a quiet day.
+- **A hard daily cap.** `claim_odds_credit()` increments a per-day counter
+  atomically, so two concurrent requests can't both claim the last credit. At the
+  cap the function serves stale cache with a note rather than failing — an old
+  price beats an empty board.
+- `docs/ODDS_FEED.md` — deploy steps, env knobs, response headers, and the
+  failure table.
+
+**Changed**
+
+- `DataSource.endpoint` is now a function that builds the Edge Function URL from
+  `SUPABASE_URL`, falling back to the same-origin `api/odds` so a Vercel
+  deployment still works.
+- Cache and quota metadata from the response headers is kept in
+  `DataSource.lastMeta`.
+
+**Security notes**
+
+- `odds_cache` and `odds_budget` have RLS on with **no policy** — service role
+  only, and the service role exists only inside the Edge Function.
+- Upstream error bodies can echo the query string back, key and all. Nothing from
+  upstream is forwarded verbatim; `scrub()` redacts the key from anything logged.
+- CORS is an allowlist, not a wildcard. **Add the new origin when VIG moves off
+  GitHub Pages**, or the board will quietly fall back to simulated data.
+
+**Notes**
+
+- Deploy with `--no-verify-jwt`: the board renders for signed-out visitors, so the
+  endpoint has to be public. Auth isn't what protects the quota; the cache is.
+- 19 new assertions. 166 total.
+
+---
+
 ## v1.6.9 — Real preseason board
 
 **Added**

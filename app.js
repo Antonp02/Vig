@@ -6,7 +6,7 @@
 
 /* Build stamp. Every "is this device on the new code?" question has cost a
    round trip; now it is on screen. Bumped with the service worker cache. */
-const VIG_BUILD = 'v1.6.9';
+const VIG_BUILD = 'v1.7.0';
 
 /* ---------- 0. Persistence ---------- */
 const KEYS = {
@@ -450,15 +450,36 @@ function bookSpread(team) {
 
 const DataSource = {
   mode: Store.get(KEYS.mode, 'mock'),
-  /* relative so the app works both at a domain root (Vercel) and under a
-     subpath (GitHub Pages at /Vig/). Pages has no serverless functions, so
-     this 404s there — which the catch below already handles by falling back
-     to the simulated board. */
-  endpoint: 'api/odds',
+  lastMeta: null,
+  /* The Supabase Edge Function, when Supabase is configured. The API key lives
+     in Edge Function Secrets and never reaches this file — the browser only
+     ever sees the odds payload. Falls back to a same-origin `api/odds` so a
+     Vercel deployment still works; on GitHub Pages that path 404s, which the
+     caller already handles by dropping back to the simulated board. */
+  endpoint() {
+    const url = ((window.VIG_CONFIG || {}).SUPABASE_URL || '').trim().replace(/\/$/, '');
+    return url ? `${url}/functions/v1/odds` : 'api/odds';
+  },
   async fetchGames() {
     if (this.mode !== 'live') return mockGames();
-    const res = await fetch(this.endpoint, { headers: { accept: 'application/json' } });
+    const ep = this.endpoint();
+    const headers = { accept: 'application/json' };
+    /* Supabase's gateway wants an apikey header even on a public function. The
+       anon key is public by design; the odds key is what must stay hidden. */
+    const anon = ((window.VIG_CONFIG || {}).SUPABASE_ANON_KEY || '').trim();
+    if (anon && ep.includes('/functions/v1/')) {
+      headers.apikey = anon;
+      headers.Authorization = `Bearer ${anon}`;
+    }
+    const res = await fetch(ep, { headers });
     if (!res.ok) throw new Error(`odds proxy returned ${res.status}`);
+    this.lastMeta = {
+      cache: res.headers.get('x-odds-cache'),
+      ageSeconds: Number(res.headers.get('x-odds-age-seconds')) || 0,
+      quotaLeft: res.headers.get('x-odds-quota-remaining'),
+      creditToday: res.headers.get('x-odds-credit-today'),
+      note: res.headers.get('x-odds-note')
+    };
     const games = normalizeOddsApi(await res.json());
     if (!games.length) throw new Error('feed returned no priced games');
     return games;
@@ -5550,7 +5571,7 @@ window.VIG = {
                get bootErrors() { return bootErrors; }, tzParts, weekKeyFor, nextResetAt, RESET_TZ, RESET_HOUR,
                GolfEvent, Admin, settleGolfEvent, settleAndSync, golfLeaderboardHtml, autoSettleFromEventData, pendingSettlement, golfTickets, getIdentity, saveIdentity, archiveWeek, blankWeek,
                Cloud, derivedBankroll, requireAccount,
-               RealBoard, buildLineTeams, validOdds, GolfOutrights, TRENDING,
+               RealBoard, buildLineTeams, validOdds, GolfOutrights, TRENDING, DataSource,
                explainAuthFailure: () => Cloud.diagnose(),
                payout, potentialReturn, realizedReturn, repairTickets, validateTicketForUpload, settleOpenTickets, updateLifetime,
                decimalOdds, americanFromDecimal, impliedProb, round2, fmtOdds, combinedAmerican, devigPair,
